@@ -97,37 +97,43 @@ const getHedgingProposalsAggregated = async (req, res) => {
       return res.status(404).json({ error: "No accessible business units found" });
     }
 
-    // 4. Aggregate exposures for allowed business units and approved status_bucketing
+    // 4. Join exposure_headers, exposure_line_items, exposure_bucketing, hedging_proposal
+    // Only include headers where bucketing.status = 'approved'
+
     const query = `
       SELECT 
-        business_unit, 
-        po_currency, 
-        type,
-        ARRAY_AGG(id) AS contributing_ids,
-        SUM(COALESCE(month_1, 0)) AS hedge_month1,
-        SUM(COALESCE(month_2, 0)) AS hedge_month2,
-        SUM(COALESCE(month_3, 0)) AS hedge_month3,
-        SUM(COALESCE(month_4, 0)) AS hedge_month4,
-        SUM(COALESCE(month_4_6, 0)) AS hedge_month4to6,
-        SUM(COALESCE(month_6plus, 0)) AS hedge_month6plus,
-        SUM(COALESCE(old_month1, 0)) AS old_hedge_month1,
-        SUM(COALESCE(old_month2, 0)) AS old_hedge_month2,
-        SUM(COALESCE(old_month3, 0)) AS old_hedge_month3,
-        SUM(COALESCE(old_month4, 0)) AS old_hedge_month4,
-        SUM(COALESCE(old_month4to6, 0)) AS old_hedge_month4to6,
-        SUM(COALESCE(old_month6plus, 0)) AS old_hedge_month6plus
-      FROM exposures 
-      WHERE (status_bucketing = 'Approved' OR status_bucketing = 'approved')
-        AND business_unit = ANY($1)
-      GROUP BY business_unit, po_currency, type 
+        h.entity AS business_unit,
+        h.currency,
+        h.exposure_type,
+        ARRAY_AGG(h.exposure_header_id) AS contributing_header_ids,
+        SUM(COALESCE(b.month_1, 0)) AS hedge_month1,
+        SUM(COALESCE(b.month_2, 0)) AS hedge_month2,
+        SUM(COALESCE(b.month_3, 0)) AS hedge_month3,
+        SUM(COALESCE(b.month_4, 0)) AS hedge_month4,
+        SUM(COALESCE(b.month_4_6, 0)) AS hedge_month4to6,
+        SUM(COALESCE(b.month_6plus, 0)) AS hedge_month6plus,
+        SUM(COALESCE(b.old_month1, 0)) AS old_hedge_month1,
+        SUM(COALESCE(b.old_month2, 0)) AS old_hedge_month2,
+        SUM(COALESCE(b.old_month3, 0)) AS old_hedge_month3,
+        SUM(COALESCE(b.old_month4, 0)) AS old_hedge_month4,
+        SUM(COALESCE(b.old_month4to6, 0)) AS old_hedge_month4to6,
+        SUM(COALESCE(b.old_month6plus, 0)) AS old_hedge_month6plus,
+        MAX(hp.comments) AS comments,
+        MAX(hp.status) AS status
+      FROM exposure_headers h
+      JOIN exposure_bucketing b ON h.exposure_header_id = b.exposure_header_id AND (b.status = 'approved' OR b.status = 'Approved')
+      JOIN exposure_line_items l ON h.exposure_header_id = l.exposure_header_id
+      LEFT JOIN hedging_proposal hp ON h.exposure_header_id = hp.exposure_header_id
+      WHERE h.entity = ANY($1)
+      GROUP BY h.entity, h.currency, h.exposure_type
     `;
     const result = await pool.query(query, [buNames]);
 
     const proposals = result.rows.map((row) => ({
-      id: row.contributing_ids[0],
+      id: row.contributing_header_ids[0],
       business_unit: row.business_unit,
-      po_currency: row.po_currency,
-      type: row.type,
+      currency: row.currency,
+      exposure_type: row.exposure_type,
       hedge_month1: Number(row.hedge_month1),
       hedge_month2: Number(row.hedge_month2),
       hedge_month3: Number(row.hedge_month3),
@@ -140,8 +146,8 @@ const getHedgingProposalsAggregated = async (req, res) => {
       old_hedge_month4: Number(row.old_hedge_month4),
       old_hedge_month4to6: Number(row.old_hedge_month4to6),
       old_hedge_month6plus: Number(row.old_hedge_month6plus),
-      remarks: null,
-      status_hedge: null,
+      comments: row.comments,
+      status: row.status,
     }));
 
     res.json({ success: true, proposals });
