@@ -9,7 +9,6 @@ exports.loginUser = async (req, res) => {
   const { email, password } = req.body;
 
   try {
-    // Get user info, roles, and permissions
     const result = await pool.query(
       `
     SELECT 
