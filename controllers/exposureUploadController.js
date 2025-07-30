@@ -1,3 +1,150 @@
+// GET /api/exposures/maturity-expiry-count-7days-headers
+const getMaturityExpiryCount7DaysFromHeaders = async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT document_date FROM exposure_headers WHERE document_date IS NOT NULL"
+    );
+    const now = new Date();
+    let count7 = 0;
+    for (const row of result.rows) {
+      const maturityDate = new Date(row.document_date);
+      if (isNaN(maturityDate.getTime())) continue;
+      const diffDays = Math.ceil((maturityDate - now) / (1000 * 60 * 60 * 24));
+      if (diffDays >= 0 && diffDays <= 7) {
+        count7++;
+      }
+    }
+    res.json({ value: count7 });
+  } catch (err) {
+    console.error(
+      "Error fetching maturity expiry count for 7 days from headers:",
+      err
+    );
+    res.status(500).json({
+      error: "Failed to fetch maturity expiry count for 7 days from headers",
+    });
+  }
+};
+// GET /api/exposures/top-currencies-headers
+const getTopCurrenciesFromHeaders = async (req, res) => {
+  const rates = {
+    USD: 1.0,
+    AUD: 0.68,
+    CAD: 0.75,
+    CHF: 1.1,
+    CNY: 0.14,
+    EUR: 1.09,
+    GBP: 1.28,
+    JPY: 0.0067,
+    SEK: 0.095,
+    INR: 0.0117,
+  };
+  try {
+    const result = await pool.query(
+      "SELECT total_open_amount, currency FROM exposure_headers"
+    );
+    const currencyTotals = {};
+    for (const row of result.rows) {
+      const currency = (row.currency || "").toUpperCase();
+      const amount = Number(row.total_open_amount) || 0;
+      const usdValue = amount * (rates[currency] || 1.0);
+      currencyTotals[currency] = (currencyTotals[currency] || 0) + usdValue;
+    }
+    // Sort currencies by value descending and take top 5
+    const sorted = Object.entries(currencyTotals).sort((a, b) => b[1] - a[1]);
+    const topCurrencies = sorted.slice(0, 5).map(([currency, value], idx) => ({
+      currency,
+      value: Number(value.toFixed(1)),
+      color:
+        idx === 0
+          ? "bg-green-400"
+          : idx === 1
+          ? "bg-blue-400"
+          : idx === 2
+          ? "bg-yellow-400"
+          : idx === 3
+          ? "bg-red-400"
+          : "bg-purple-400",
+    }));
+    res.json(topCurrencies);
+  } catch (err) {
+    console.error("Error fetching top currencies from headers:", err);
+    res
+      .status(500)
+      .json({ error: "Failed to fetch top currencies from headers" });
+  }
+};
+// GET /api/exposures/bu-maturity-currency-summary-joined
+const getBuMaturityCurrencySummaryJoined = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT h.entity AS business_unit, h.currency, h.exposure_type,
+              h.total_open_amount,
+              b.month_1, b.month_2, b.month_3, b.month_4, b.month_4_6, b.month_6plus
+       FROM exposure_headers h
+       JOIN exposure_bucketing b ON h.exposure_header_id = b.exposure_header_id`
+    );
+
+    const summary = {};
+    const maturityBuckets = [
+      "month_1",
+      "month_2",
+      "month_3",
+      "month_4",
+      "month_4_6",
+      "month_6plus",
+    ];
+    const bucketLabels = {
+      month_1: "1 Month",
+      month_2: "2 Month",
+      month_3: "3 Month",
+      month_4: "4 Month",
+      month_4_6: "4-6 Month",
+      month_6plus: "6 Month +",
+    };
+
+    for (const row of result.rows) {
+      const bu = row.business_unit || "Unknown";
+      const currency = (row.currency || "Unknown").toUpperCase();
+      const exposureType = (row.exposure_type || "").toUpperCase();
+      for (const bucket of maturityBuckets) {
+        const amount = Number(row[bucket]) || 0;
+        if (amount === 0) continue;
+        if (!summary[bucket]) summary[bucket] = {};
+        if (!summary[bucket][bu]) summary[bucket][bu] = {};
+        if (!summary[bucket][bu][currency])
+          summary[bucket][bu][currency] = { payables: 0, receivables: 0 };
+        if (exposureType === "PO") {
+          summary[bucket][bu][currency].payables += amount;
+        } else if (exposureType === "SO" || exposureType === "LC") {
+          summary[bucket][bu][currency].receivables += amount;
+        }
+      }
+    }
+
+    const response = [];
+    for (const bucket in summary) {
+      const maturityLabel = bucketLabels[bucket] || bucket;
+      for (const bu in summary[bucket]) {
+        for (const currency in summary[bucket][bu]) {
+          const { payables, receivables } = summary[bucket][bu][currency];
+          response.push({
+            maturity: maturityLabel,
+            business_unit: bu,
+            currency,
+            payables,
+            receivables,
+          });
+        }
+      }
+    }
+
+    res.json(response);
+  } catch (err) {
+    console.error("Error fetching joined maturity summary:", err);
+    res.status(500).json({ error: "Failed to fetch joined maturity summary" });
+  }
+};
 // controllers/exposureUploadController.js
 // Handles endpoints for exposure upload related logic
 const path = require("path");
@@ -521,7 +668,8 @@ const approveMultipleExposures = async (req, res) => {
       results.approved = approved.rows;
     }
 
-    res.status(200).json({ success: true, ...results });
+    getMaturityExpiryCount7DaysFromHeaders,
+      res.status(200).json({ success: true, ...results });
   } catch (err) {
     console.error("approveMultipleExposures error:", err);
     res.status(500).json({ success: false, error: err.message });
@@ -706,6 +854,44 @@ const getPoAmountUsdSum = async (req, res) => {
   }
 };
 
+// GET /api/exposures/total-open-amount-usd-sum-headers
+const getTotalOpenAmountUsdSumFromHeaders = async (req, res) => {
+  // Exchange rates to USD
+  const rates = {
+    USD: 1.0,
+    AUD: 0.68,
+    CAD: 0.75,
+    CHF: 1.1,
+    CNY: 0.14,
+    EUR: 1.09,
+    GBP: 1.28,
+    JPY: 0.0067,
+    SEK: 0.095,
+    INR: 0.0117,
+  };
+  try {
+    const result = await pool.query(
+      "SELECT total_open_amount, currency FROM exposure_headers"
+    );
+    let totalUsd = 0;
+    for (const row of result.rows) {
+      const amount = Number(row.total_open_amount) || 0;
+      const currency = (row.currency || "").toUpperCase();
+      const rate = rates[currency] || 1.0;
+      totalUsd += amount * rate;
+    }
+    res.json({ totalUsd });
+  } catch (err) {
+    console.error(
+      "Error calculating total_open_amount sum in USD from headers:",
+      err
+    );
+    res.status(500).json({
+      error: "Failed to calculate total_open_amount sum in USD from headers",
+    });
+  }
+};
+
 // GET /api/exposures/payables
 const getPayablesByCurrency = async (req, res) => {
   const rates = {
@@ -741,6 +927,46 @@ const getPayablesByCurrency = async (req, res) => {
   } catch (err) {
     console.error("Error fetching payables by currency:", err);
     res.status(500).json({ error: "Failed to fetch payables by currency" });
+  }
+};
+
+// GET /api/exposures/payables-headers
+const getPayablesByCurrencyFromHeaders = async (req, res) => {
+  const rates = {
+    USD: 1.0,
+    AUD: 0.68,
+    CAD: 0.75,
+    CHF: 1.1,
+    CNY: 0.14,
+    EUR: 1.09,
+    GBP: 1.28,
+    JPY: 0.0067,
+    SEK: 0.095,
+    INR: 0.0117,
+  };
+  try {
+    const result = await pool.query(
+      "SELECT total_open_amount, currency FROM exposure_headers WHERE exposure_type = 'PO'"
+    );
+    const currencyTotals = {};
+    for (const row of result.rows) {
+      const currency = (row.currency || "").toUpperCase();
+      const amount = Number(row.total_open_amount) || 0;
+      currencyTotals[currency] =
+        (currencyTotals[currency] || 0) + amount * (rates[currency] || 1.0);
+    }
+    const payablesData = Object.entries(currencyTotals).map(
+      ([currency, amount]) => ({
+        currency,
+        amount: `$${(amount / 1000).toFixed(1)}K`,
+      })
+    );
+    res.json(payablesData);
+  } catch (err) {
+    console.error("Error fetching payables by currency from headers:", err);
+    res
+      .status(500)
+      .json({ error: "Failed to fetch payables by currency from headers" });
   }
 };
 
@@ -782,6 +1008,46 @@ const getReceivablesByCurrency = async (req, res) => {
   }
 };
 
+// GET /api/exposures/receivables-headers
+const getReceivablesByCurrencyFromHeaders = async (req, res) => {
+  const rates = {
+    USD: 1.0,
+    AUD: 0.68,
+    CAD: 0.75,
+    CHF: 1.1,
+    CNY: 0.14,
+    EUR: 1.09,
+    GBP: 1.28,
+    JPY: 0.0067,
+    SEK: 0.095,
+    INR: 0.0117,
+  };
+  try {
+    const result = await pool.query(
+      "SELECT total_open_amount, currency, exposure_type FROM exposure_headers WHERE exposure_type = 'SO' OR exposure_type = 'LC'"
+    );
+    const currencyTotals = {};
+    for (const row of result.rows) {
+      const currency = (row.currency || "").toUpperCase();
+      const amount = Number(row.total_open_amount) || 0;
+      currencyTotals[currency] =
+        (currencyTotals[currency] || 0) + amount * (rates[currency] || 1.0);
+    }
+    const receivablesData = Object.entries(currencyTotals).map(
+      ([currency, amount]) => ({
+        currency,
+        amount: `$${(amount / 1000).toFixed(1)}K`,
+      })
+    );
+    res.json(receivablesData);
+  } catch (err) {
+    console.error("Error fetching receivables by currency from headers:", err);
+    res
+      .status(500)
+      .json({ error: "Failed to fetch receivables by currency from headers" });
+  }
+};
+
 // GET /api/exposures/getpoAmountByCurrency
 const getAmountByCurrency = async (req, res) => {
   const rates = {
@@ -818,6 +1084,47 @@ const getAmountByCurrency = async (req, res) => {
   } catch (err) {
     console.error("Error fetching payables by currency:", err);
     res.status(500).json({ error: "Failed to fetch payables by currency" });
+  }
+};
+
+// GET /api/exposures/getAmountByCurrency-headers
+const getAmountByCurrencyFromHeaders = async (req, res) => {
+  const rates = {
+    USD: 1.0,
+    AUD: 0.68,
+    CAD: 0.75,
+    CHF: 1.1,
+    CNY: 0.14,
+    EUR: 1.09,
+    GBP: 1.28,
+    JPY: 0.0067,
+    SEK: 0.095,
+    INR: 0.0117,
+  };
+  try {
+    const result = await pool.query(
+      "SELECT total_open_amount, currency FROM exposure_headers"
+    );
+    const currencyTotals = {};
+    for (const row of result.rows) {
+      const currency = (row.currency || "").toUpperCase();
+      const amount = Number(row.total_open_amount) || 0;
+      currencyTotals[currency] =
+        (currencyTotals[currency] || 0) + amount * (rates[currency] || 1.0);
+    }
+    const payablesData = Object.entries(currencyTotals).map(
+      ([currency, amount]) => ({
+        currency,
+        amount: `$${(amount / 1000).toFixed(1)}K`,
+      })
+    );
+
+    res.json(payablesData);
+  } catch (err) {
+    console.error("Error fetching payables by currency from headers:", err);
+    res
+      .status(500)
+      .json({ error: "Failed to fetch payables by currency from headers" });
   }
 };
 
@@ -871,6 +1178,60 @@ const getBusinessUnitCurrencySummary = async (req, res) => {
   }
 };
 
+// GET /api/exposures/business-unit-currency-summary-headers
+const getBusinessUnitCurrencySummaryFromHeaders = async (req, res) => {
+  // Exchange rates to USD
+  const rates = {
+    USD: 1.0,
+    AUD: 0.68,
+    CAD: 0.75,
+    CHF: 1.1,
+    CNY: 0.14,
+    EUR: 1.09,
+    GBP: 1.28,
+    JPY: 0.0067,
+    SEK: 0.095,
+    INR: 0.0117,
+  };
+  try {
+    const result = await pool.query(
+      "SELECT entity, currency, total_open_amount FROM exposure_headers"
+    );
+    // Aggregate by entity (business_unit) and currency
+    const buMap = {};
+    for (const row of result.rows) {
+      const bu = row.entity || "Unknown";
+      const currency = (row.currency || "Unknown").toUpperCase();
+      const amount = Number(row.total_open_amount) || 0;
+      const usdAmount = amount * (rates[currency] || 1.0);
+      if (!buMap[bu]) buMap[bu] = {};
+      if (!buMap[bu][currency]) buMap[bu][currency] = 0;
+      buMap[bu][currency] += usdAmount;
+    }
+    // Format output
+    const output = Object.entries(buMap).map(([bu, currencies]) => {
+      const total = Object.values(currencies).reduce((a, b) => a + b, 0);
+      return {
+        name: bu,
+        total: `$${(total / 1000).toFixed(1)}K`,
+        currencies: Object.entries(currencies).map(([code, amount]) => ({
+          code,
+          amount: `$${(amount / 1000).toFixed(1)}K`,
+        })),
+      };
+    });
+    res.json(output);
+  } catch (err) {
+    console.error(
+      "Error fetching business unit currency summary from headers:",
+      err
+    );
+    res.status(500).json({
+      error: "Failed to fetch business unit currency summary from headers",
+    });
+  }
+};
+
 const getMaturityExpirySummary = async (req, res) => {
   // Exchange rates to USD
   const rates = {
@@ -916,6 +1277,57 @@ const getMaturityExpirySummary = async (req, res) => {
   } catch (err) {
     console.error("Error fetching maturity expiry summary:", err);
     res.status(500).json({ error: "Failed to fetch maturity expiry summary" });
+  }
+};
+
+// GET /api/exposures/maturity-expiry-summary-headers
+const getMaturityExpirySummaryFromHeaders = async (req, res) => {
+  // Exchange rates to USD
+  const rates = {
+    USD: 1.0,
+    AUD: 0.68,
+    CAD: 0.75,
+    CHF: 1.1,
+    CNY: 0.14,
+    EUR: 1.09,
+    GBP: 1.28,
+    JPY: 0.0067,
+    SEK: 0.095,
+    INR: 0.0117,
+  };
+  try {
+    const result = await pool.query(
+      "SELECT total_open_amount, currency, document_date FROM exposure_headers WHERE document_date IS NOT NULL"
+    );
+    const now = new Date();
+    let sum7 = 0,
+      sum30 = 0,
+      sumTotal = 0;
+    for (const row of result.rows) {
+      const amount = Number(row.total_open_amount) || 0;
+      const currency = (row.currency || "USD").toUpperCase();
+      const rate = rates[currency] || 1.0;
+      const usdAmount = amount * rate;
+      const maturityDate = new Date(row.document_date);
+      if (isNaN(maturityDate.getTime())) continue;
+      const diffDays = Math.ceil((maturityDate - now) / (1000 * 60 * 60 * 24));
+      if (diffDays >= 0) {
+        sumTotal += usdAmount;
+        if (diffDays <= 7) sum7 += usdAmount;
+        if (diffDays <= 30) sum30 += usdAmount;
+      }
+    }
+    const output = [
+      { label: "Next 7 Days", value: `$${(sum7 / 1000).toFixed(1)}K` },
+      { label: "Next 30 Days", value: `$${(sum30 / 1000).toFixed(1)}K` },
+      { label: "Total Upcoming", value: `$${(sumTotal / 1000).toFixed(1)}K` },
+    ];
+    res.json(output);
+  } catch (err) {
+    console.error("Error fetching maturity expiry summary from headers:", err);
+    res
+      .status(500)
+      .json({ error: "Failed to fetch maturity expiry summary from headers" });
   }
 };
 const getMaturityExpiryCount7Days = async (req, res) => {
@@ -1520,12 +1932,21 @@ module.exports = {
   approveMultipleExposures,
   rejectMultipleExposures,
   getBuMaturityCurrencySummary,
+  getMaturityExpiryCount7DaysFromHeaders,
+  getBuMaturityCurrencySummaryJoined,
   getTopCurrencies,
+  getTopCurrenciesFromHeaders,
   getPoAmountUsdSum,
+  getTotalOpenAmountUsdSumFromHeaders,
+  getAmountByCurrencyFromHeaders,
   getAmountByCurrency,
+  getReceivablesByCurrencyFromHeaders,
   getReceivablesByCurrency,
   getPayablesByCurrency,
+  getPayablesByCurrencyFromHeaders,
+  getBusinessUnitCurrencySummaryFromHeaders,
   getBusinessUnitCurrencySummary,
+  getMaturityExpirySummaryFromHeaders,
   getMaturityExpirySummary,
   getMaturityExpiryCount7Days,
   getExposureHeadersLineItems,
@@ -1698,7 +2119,7 @@ async function approveMultipleExposureHeaders(req, res) {
           if (parentRows.length > 0) {
             const parentId = parentRows[0].exposure_header_id;
             await client.query(
-              `UPDATE exposure_headers SET total_open_amount = total_open_amount + $1 WHERE exposure_header_id = $2`,
+              `UPDATE exposure_headers SET total_open_amount = total_open_amount + $1, status = 'Open' WHERE exposure_header_id = $2`,
               [h.total_original_amount, parentId]
             );
           }
@@ -1740,7 +2161,7 @@ async function approveMultipleExposureHeaders(req, res) {
             const parentId = parentRows[0].exposure_header_id;
             // Subtract the original amount from parent's open amount
             await client.query(
-              `UPDATE exposure_headers SET total_open_amount = total_open_amount - $1 WHERE exposure_header_id = $2`,
+              `UPDATE exposure_headers SET total_open_amount = total_open_amount - $1, status = 'Rolled' WHERE exposure_header_id = $2`,
               [h.total_original_amount, parentId]
             );
             // Set status to 'Rolled' for this LC (status change only for rolled)
