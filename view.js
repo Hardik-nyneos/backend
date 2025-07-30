@@ -1,15 +1,15 @@
 const { Client } = require("pg");
 
-const db = new Client({
-  user: "avnadmin",
-  password: "AVNS_L6PcvF7OBRIZu5QDpZ4",
-  host: "pg-nyneos-kanavlt885-nyneos.g.aivencloud.com",
-  port: 15247,
-  database: "defaultdb",
-  ssl: {
-    rejectUnauthorized: false,
-  },
-});
+// const db = new Client({
+//   user: "avnadmin",
+//   password: "AVNS_L6PcvF7OBRIZu5QDpZ4",
+//   host: "pg-nyneos-kanavlt885-nyneos.g.aivencloud.com",
+//   port: 15247,
+//   database: "defaultdb",
+//   ssl: {
+//     rejectUnauthorized: false,
+//   },
+// });
 
 const tables = [
   //   "roles",
@@ -33,13 +33,7 @@ const tables = [
       const res = await db.query(
         `
 SELECT
-  conname AS constraint_name,
-  contype AS constraint_type,
-  pg_get_constraintdef(oid) AS definition
-FROM
-  pg_constraint
-WHERE
-  conrelid = 'masterentity'::regclass;
+* FROM users
 
 
   

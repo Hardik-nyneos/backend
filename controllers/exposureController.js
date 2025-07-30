@@ -5,15 +5,6 @@ const fs = require("fs");
 
 const upload = multer({ dest: "uploads/" });
 
-const db = new Client({
-  user: "avnadmin",
-  password: "AVNS_L6PcvF7OBRIZu5QDpZ4",
-  host: "pg-nyneos-kanavlt885-nyneos.g.aivencloud.com",
-  port: 15247,
-  database: "defaultdb",
-  ssl: { rejectUnauthorized: false },
-});
-
 db.connect();
 
 exports.uploadCsv = [
@@ -65,12 +56,10 @@ exports.uploadCsv = [
           fs.unlinkSync(filePath);
           res.status(200).json({ message: "CSV uploaded and saved to DB ✅" });
         } catch (error) {
-          res
-            .status(500)
-            .json({
-              error: "Failed to insert CSV rows ❌",
-              details: error.message,
-            });
+          res.status(500).json({
+            error: "Failed to insert CSV rows ❌",
+            details: error.message,
+          });
         }
       });
   },
