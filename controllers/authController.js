@@ -6,6 +6,7 @@ const { pool } = require("../db");
 const globalSession = require("../globalSession.js"); // Import the entire object
 
 exports.loginUser = async (req, res) => {
+  console.log(req.body);
   const { email, password } = req.body;
 
   try {
