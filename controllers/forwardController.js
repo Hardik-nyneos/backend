@@ -1,3 +1,230 @@
+// Multi-file upload for forward confirmations (CSV/Excel) - UPDATE existing records
+async function uploadForwardConfirmationsMulti(req, res) {
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ error: "No files uploaded" });
+  }
+  const globalSession = require("../globalSession");
+  const session = globalSession.UserSessions[0];
+  if (!session) {
+    req.files.forEach(f => fs.unlinkSync(f.path));
+    return res.status(404).json({ error: "No active session found" });
+  }
+  const userId = session.userId;
+  let buNames = [];
+  try {
+    const userResult = await pool.query(
+      "SELECT business_unit_name FROM users WHERE id = $1",
+      [userId]
+    );
+    if (!userResult.rows.length) {
+      req.files.forEach(f => fs.unlinkSync(f.path));
+      return res.status(404).json({ error: "User not found" });
+    }
+    const userBu = userResult.rows[0].business_unit_name;
+    if (!userBu) {
+      req.files.forEach(f => fs.unlinkSync(f.path));
+      return res.status(404).json({ error: "User has no business unit assigned" });
+    }
+    const entityResult = await pool.query(
+      "SELECT entity_id FROM masterEntity WHERE entity_name = $1 AND (approval_status = 'Approved' OR approval_status = 'approved') AND (is_deleted = false OR is_deleted IS NULL)",
+      [userBu]
+    );
+    if (!entityResult.rows.length) {
+      req.files.forEach(f => fs.unlinkSync(f.path));
+      return res.status(404).json({ error: "Business unit entity not found" });
+    }
+    const rootEntityId = entityResult.rows[0].entity_id;
+    const descendantsResult = await pool.query(
+      `WITH RECURSIVE descendants AS (
+        SELECT entity_id, entity_name FROM masterEntity WHERE entity_id = $1
+        UNION ALL
+        SELECT me.entity_id, me.entity_name
+        FROM masterEntity me
+        INNER JOIN entityRelationships er ON me.entity_id = er.child_entity_id
+        INNER JOIN descendants d ON er.parent_entity_id = d.entity_id
+        WHERE (me.approval_status = 'Approved' OR me.approval_status = 'approved') AND (me.is_deleted = false OR me.is_deleted IS NULL)
+      )
+      SELECT entity_name FROM descendants`,
+      [rootEntityId]
+    );
+    buNames = descendantsResult.rows.map((r) => r.entity_name);
+    if (!buNames.length) {
+      req.files.forEach(f => fs.unlinkSync(f.path));
+      return res.status(404).json({ error: "No accessible business units found" });
+    }
+  } catch (err) {
+    req.files.forEach(f => fs.unlinkSync(f.path));
+    console.error("Error fetching allowed business units:", err);
+    return res.status(500).json({ error: "Failed to fetch allowed business units" });
+  }
+
+  // Process each file
+  const results = [];
+  for (const file of req.files) {
+    let rows = [];
+    let fileType = path.extname(file.originalname).toLowerCase();
+    // Parse file
+    try {
+      if (fileType === ".csv") {
+        rows = await new Promise((resolve, reject) => {
+          const arr = [];
+          fs.createReadStream(file.path)
+            .pipe(csv())
+            .on("data", (row) => arr.push(row))
+            .on("end", () => resolve(arr))
+            .on("error", (err) => reject(err));
+        });
+      } else if (fileType === ".xls" || fileType === ".xlsx") {
+        const workbook = XLSX.readFile(file.path);
+        const sheetName = workbook.SheetNames[0];
+        rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: null });
+      } else {
+        throw new Error("Unsupported file type");
+      }
+    } catch (err) {
+      results.push({ filename: file.originalname, error: "Failed to parse file: " + err.message });
+      fs.unlinkSync(file.path);
+      continue;
+    }
+    if (!Array.isArray(rows) || rows.length === 0) {
+      results.push({ filename: file.originalname, error: "No data to upload" });
+      fs.unlinkSync(file.path);
+      continue;
+    }
+    // Update rows
+    let successCount = 0;
+    let errorRows = [];
+    let invalidRows = [];
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (!buNames.includes(r.entity_level_0)) {
+        invalidRows.push({ row: i + 1, entity: r.entity_level_0 });
+        continue;
+      }
+      try {
+        // Only update if record exists and status is 'Pending Confirmation'
+        const updateQuery = `UPDATE forward_bookings SET
+          status = 'Confirmed',
+          bank_transaction_id = $1,
+          swift_unique_id = $2,
+          bank_confirmation_date = $3,
+          processing_status = 'pending'
+        WHERE internal_reference_id = $4 AND status = 'Pending Confirmation' AND entity_level_0 = $5
+        RETURNING *`;
+        const updateValues = [
+          r.bank_transaction_id,
+          r.swift_unique_id,
+          r.bank_confirmation_date,
+          r.internal_reference_id,
+          r.entity_level_0
+        ];
+        const result = await pool.query(updateQuery, updateValues);
+        if (result.rowCount > 0) {
+          successCount++;
+        } else {
+          errorRows.push({ row: i + 1, error: "No matching record found or already confirmed" });
+        }
+      } catch (err) {
+        errorRows.push({ row: i + 1, error: err.message });
+      }
+    }
+    results.push({ filename: file.originalname, updated: successCount, errors: errorRows, invalidRows });
+    fs.unlinkSync(file.path);
+  }
+  res.status(200).json({ success: true, results });
+}
+// Manual entry for forward confirmations - UPDATE existing record
+async function addForwardConfirmationManualEntry(req, res) {
+  try {
+    const globalSession = require("../globalSession");
+    const session = globalSession.UserSessions[0];
+    if (!session) {
+      return res.status(404).json({ error: "No active session found" });
+    }
+    const userId = session.userId;
+    let buNames = [];
+    try {
+      const userResult = await pool.query(
+        "SELECT business_unit_name FROM users WHERE id = $1",
+        [userId]
+      );
+      if (!userResult.rows.length) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      const userBu = userResult.rows[0].business_unit_name;
+      if (!userBu) {
+        return res.status(404).json({ error: "User has no business unit assigned" });
+      }
+      const entityResult = await pool.query(
+        "SELECT entity_id FROM masterEntity WHERE entity_name = $1 AND (approval_status = 'Approved' OR approval_status = 'approved') AND (is_deleted = false OR is_deleted IS NULL)",
+        [userBu]
+      );
+      if (!entityResult.rows.length) {
+        return res.status(404).json({ error: "Business unit entity not found" });
+      }
+      const rootEntityId = entityResult.rows[0].entity_id;
+      const descendantsResult = await pool.query(
+        `WITH RECURSIVE descendants AS (
+          SELECT entity_id, entity_name FROM masterEntity WHERE entity_id = $1
+          UNION ALL
+          SELECT me.entity_id, me.entity_name
+          FROM masterEntity me
+          INNER JOIN entityRelationships er ON me.entity_id = er.child_entity_id
+          INNER JOIN descendants d ON er.parent_entity_id = d.entity_id
+          WHERE (me.approval_status = 'Approved' OR me.approval_status = 'approved') AND (me.is_deleted = false OR me.is_deleted IS NULL)
+        )
+        SELECT entity_name FROM descendants`,
+        [rootEntityId]
+      );
+      buNames = descendantsResult.rows.map((r) => r.entity_name);
+      if (!buNames.length) {
+        return res.status(404).json({ error: "No accessible business units found" });
+      }
+    } catch (err) {
+      console.error("Error fetching allowed business units:", err);
+      return res.status(500).json({ error: "Failed to fetch allowed business units" });
+    }
+
+    const {
+      internal_reference_id,
+      entity_level_0,
+      bank_transaction_id,
+      swift_unique_id,
+      bank_confirmation_date
+    } = req.body;
+
+    if (!buNames.includes(entity_level_0)) {
+      return res.status(403).json({ error: "You do not have access to this business unit" });
+    }
+
+    // Only update if record exists and status is 'Pending Confirmation'
+    const updateQuery = `UPDATE forward_bookings SET
+      status = 'Confirmed',
+      bank_transaction_id = $1,
+      swift_unique_id = $2,
+      bank_confirmation_date = $3,
+      processing_status = 'pending'
+    WHERE internal_reference_id = $4 AND status = 'Pending Confirmation' AND entity_level_0 = $5
+    RETURNING *`;
+    const updateValues = [
+      bank_transaction_id,
+      swift_unique_id,
+      bank_confirmation_date,
+      internal_reference_id,
+      entity_level_0
+    ];
+    const result = await pool.query(updateQuery, updateValues);
+    if (result.rowCount > 0) {
+      res.status(200).json({ success: true, updated: result.rows[0] });
+    } else {
+      res.status(404).json({ success: false, error: "No matching record found or already confirmed" });
+    }
+  } catch (err) {
+    console.error("addForwardConfirmationManualEntry error:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+}
+    
 const path = require("path");
 const fs = require("fs");
 const csv = require("csv-parser");
@@ -383,4 +610,6 @@ module.exports = {
   addForwardBookingManualEntry,
   upload,
   uploadForwardBookingsMulti,
+  uploadForwardConfirmationsMulti,
+  addForwardConfirmationManualEntry,
 };
