@@ -28,28 +28,61 @@ router.get(
   "/netanalysis",
   exposureUploadController.getBuMaturityCurrencySummary
 );
+router.get(
+  "/netanalysis-joined",
+  exposureUploadController.getBuMaturityCurrencySummaryJoined
+);
 router.get("/top-currencies", exposureUploadController.getTopCurrencies);
+router.get(
+  "/top-currencies-headers",
+  exposureUploadController.getTopCurrenciesFromHeaders
+);
 router.get("/USDsum", exposureUploadController.getPoAmountUsdSum);
+router.get(
+  "/USDsum-headers",
+  exposureUploadController.getTotalOpenAmountUsdSumFromHeaders
+);
 router.get("/payables", exposureUploadController.getPayablesByCurrency);
+router.get(
+  "/payables-headers",
+  exposureUploadController.getPayablesByCurrencyFromHeaders
+);
 router.get("/receivables", exposureUploadController.getReceivablesByCurrency);
+router.get(
+  "/receivables-headers",
+  exposureUploadController.getReceivablesByCurrencyFromHeaders
+);
 router.get(
   "/getpoAmountByCurrency",
   exposureUploadController.getAmountByCurrency
 );
-
+router.get(
+  "/getAmountByCurrency-headers",
+  exposureUploadController.getAmountByCurrencyFromHeaders
+);
 router.get(
   "/buintexp",
   exposureUploadController.getBusinessUnitCurrencySummary
 );
-
+router.get(
+  "/business-unit-currency-summary-headers",
+  exposureUploadController.getBusinessUnitCurrencySummaryFromHeaders
+);
 router.get(
   "/matexpirysummary",
   exposureUploadController.getMaturityExpirySummary
 );
-
+router.get(
+  "/maturity-expiry-summary-headers",
+  exposureUploadController.getMaturityExpirySummaryFromHeaders
+);
 router.get(
   "/matexpirycount7days",
   exposureUploadController.getMaturityExpiryCount7Days
+);
+router.get(
+  "/maturity-expiry-count-7days-headers",
+  exposureUploadController.getMaturityExpiryCount7DaysFromHeaders
 );
 //----------------------------------------------------------------------------------------------------------
 
