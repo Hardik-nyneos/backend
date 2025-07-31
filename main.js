@@ -19,6 +19,7 @@ const exposureBucketingRoutes = require("./routes/exposureBucketing");
 const sessionChecker = require("./middleware/sessionChecker");
 const hedgingProposalRoutes = require("./routes/hedgingProposal");
 const forwards = require("./routes/forwardBookings");
+const forwardDashRoutes = require("./routes/forwardDash");
 
 const app = express();
 const port = process.env.PORT || 3143;
@@ -43,6 +44,7 @@ app.use("/api/entity", entityRoutes);
 app.use("/api/exposureUpload", exposureUploadRoutes);
 app.use("/api/exposureBucketing", exposureBucketingRoutes);
 app.use("/api/hedgingProposal", hedgingProposalRoutes);
+app.use("/api/forwardDash", forwardDashRoutes);
 
 app.get("/api/version", (req, res) => {
   res.json({ version: globalSession.Versions[0] });
