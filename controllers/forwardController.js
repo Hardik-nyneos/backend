@@ -15,6 +15,37 @@ async function linkExposureHedge(req, res) {
     `;
     const values = [exposure_header_id, booking_id, hedged_amount];
     const result = await pool.query(upsertQuery, values);
+    // Get booking amount from forward_bookings
+    const bookingRes = await pool.query(
+      'SELECT Booking_Amount FROM forward_bookings WHERE system_transaction_id = $1',
+      [booking_id]
+    );
+    let bookingAmount = 0;
+    if (bookingRes.rows.length && bookingRes.rows[0].Booking_Amount !== null && bookingRes.rows[0].Booking_Amount !== undefined) {
+      bookingAmount = Number(bookingRes.rows[0].Booking_Amount) || 0;
+    }
+    // Sum all previous actions (UTILIZATION, CANCELLATION, ROLLOVER, etc.) for this booking
+    const sumRes = await pool.query(
+      `SELECT COALESCE(SUM(amount_changed), 0) AS total_utilized FROM forward_booking_ledger WHERE booking_id = $1 AND action_type IN ('UTILIZATION', 'CANCELLATION', 'ROLLOVER')`,
+      [booking_id]
+    );
+    let totalUtilized = 0;
+    if (sumRes.rows[0].total_utilized !== null && sumRes.rows[0].total_utilized !== undefined) {
+      totalUtilized = Number(sumRes.rows[0].total_utilized) || 0;
+    }
+    // Calculate new open amount
+    let hedgedAmt = 0;
+    if (hedged_amount !== null && hedged_amount !== undefined) {
+      hedgedAmt = Number(hedged_amount) || 0;
+    }
+    let newOpenAmount = bookingAmount - totalUtilized;
+    // Log to forward_booking_ledger as UTILIZATION
+    const ledgerQuery = `
+      INSERT INTO forward_booking_ledger (
+        booking_id, action_type, action_id, action_date, amount_changed, running_open_amount
+      ) VALUES ($1, 'UTILIZATION', $2, CURRENT_DATE, $3, $4)
+    `;
+    await pool.query(ledgerQuery, [booking_id, exposure_header_id, hedged_amount, newOpenAmount]);
     res.status(200).json({ success: true, link: result.rows[0] });
   } catch (err) {
     console.error("linkExposureHedge error:", err);
@@ -718,8 +749,14 @@ async function bulkUpdateForwardBookingProcessingStatus(req, res) {
     if (!Array.isArray(system_transaction_ids) || system_transaction_ids.length === 0 || !['Approved', 'Rejected'].includes(processing_status)) {
       return res.status(400).json({ error: "system_transaction_ids (array) and valid processing_status (Approved/Rejected) required" });
     }
-    const query = `UPDATE forward_bookings SET processing_status = $1 WHERE system_transaction_id = ANY($2) RETURNING *`;
-    const values = [processing_status, system_transaction_ids];
+    let query, values;
+    if (processing_status === 'Approved') {
+      query = `UPDATE forward_bookings SET processing_status = $1, status = 'Confirmed' WHERE system_transaction_id = ANY($2) RETURNING *`;
+      values = [processing_status, system_transaction_ids];
+    } else {
+      query = `UPDATE forward_bookings SET processing_status = $1 WHERE system_transaction_id = ANY($2) RETURNING *`;
+      values = [processing_status, system_transaction_ids];
+    }
     const result = await pool.query(query, values);
     if (result.rowCount > 0) {
       res.status(200).json({ success: true, updated: result.rows });
