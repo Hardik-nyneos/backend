@@ -1,3 +1,229 @@
+// GET /api/exposures/hedgeLinksDetails
+const hedgeLinksDetails = async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT l.*, h.document_id, f.internal_reference_id
+      FROM exposure_hedge_links l
+      LEFT JOIN exposure_headers h ON l.exposure_header_id = h.exposure_header_id
+      LEFT JOIN forward_bookings f ON l.booking_id = f.system_transaction_id
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error in hedgeLinksDetails:", err);
+    res.status(500).json({ error: "Failed to fetch hedge links details" });
+  }
+};
+// GET /api/exposures/expfwdLinkingBookings
+const expfwdLinkingBookings = async (req, res) => {
+  try {
+    // 0. Get current user session and allowed buNames
+    const session = globalSession.UserSessions[0];
+    if (!session) {
+      return res.status(404).json({ error: "No active session found" });
+    }
+    const userId = session.userId;
+    const userResult = await pool.query(
+      "SELECT business_unit_name FROM users WHERE id = $1",
+      [userId]
+    );
+    if (!userResult.rows.length) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const userBu = userResult.rows[0].business_unit_name;
+    if (!userBu) {
+      return res.status(404).json({ error: "User has no business unit assigned" });
+    }
+    const entityResult = await pool.query(
+      "SELECT entity_id FROM masterEntity WHERE entity_name = $1 AND (approval_status = 'Approved' OR approval_status = 'approved') AND (is_deleted = false OR is_deleted IS NULL)",
+      [userBu]
+    );
+    if (!entityResult.rows.length) {
+      return res.status(404).json({ error: "Business unit entity not found" });
+    }
+    const rootEntityId = entityResult.rows[0].entity_id;
+    const descendantsResult = await pool.query(
+      `WITH RECURSIVE descendants AS (
+        SELECT entity_id, entity_name FROM masterEntity WHERE entity_id = $1
+        UNION ALL
+        SELECT me.entity_id, me.entity_name
+        FROM masterEntity me
+        INNER JOIN entityRelationships er ON me.entity_id = er.child_entity_id
+        INNER JOIN descendants d ON er.parent_entity_id = d.entity_id
+        WHERE (me.approval_status = 'Approved' OR me.approval_status = 'approved') AND (me.is_deleted = false OR me.is_deleted IS NULL)
+      )
+      SELECT entity_name FROM descendants`,
+      [rootEntityId]
+    );
+    const buNames = descendantsResult.rows.map((r) => r.entity_name);
+    if (!buNames.length) {
+      return res.status(404).json({ error: "No accessible business units found" });
+    }
+
+    // 1. Get all forward bookings
+    const bookingsResult = await pool.query(`
+      SELECT system_transaction_id, entity_level_0, order_type, quote_currency, maturity_date, booking_amount, counterparty_dealer
+      FROM forward_bookings
+      WHERE processing_status = 'approved' OR processing_status = 'Approved'
+    `);
+    const bookings = bookingsResult.rows.filter((b) => buNames.includes(b.entity_level_0));
+
+    // 2. Get linked amounts for all system_transaction_ids
+    const bookingIds = bookings.map((b) => b.system_transaction_id);
+    let hedgeLinks = [];
+    if (bookingIds.length > 0) {
+      const hedgeResult = await pool.query(
+        `SELECT booking_id, SUM(hedged_amount) AS linked_amount
+         FROM exposure_hedge_links
+         WHERE booking_id = ANY($1)
+         GROUP BY booking_id`,
+        [bookingIds]
+      );
+      hedgeLinks = hedgeResult.rows;
+    }
+    const hedgeMap = {};
+    for (const row of hedgeLinks) {
+      hedgeMap[row.booking_id] = Number(row.linked_amount) || 0;
+    }
+
+    // 3. Get bu unit compliance (approved, not deleted masterEntity)
+    const buResult = await pool.query(
+      `SELECT entity_id, entity_name FROM masterEntity WHERE (approval_status = 'Approved' OR approval_status = 'approved')`
+    );
+    const buCompliance = {};
+    for (const row of buResult.rows) {
+      buCompliance[row.entity_name] = true;
+    }
+
+    // 4. Build response
+    const response = bookings.map((b) => {
+      const linkedAmount = hedgeMap[b.system_transaction_id] || 0;
+      return {
+        bu: b.entity_level_0,
+        system_transaction_id: b.system_transaction_id,
+        type: b.order_type,
+        currency: b.quote_currency,
+        maturity_date: b.maturity_date,
+        amount: b.booking_amount,
+        linked_amount: linkedAmount,
+        bu_unit_compliance: !!buCompliance[b.entity_level_0],
+        Bank: b.counterparty_dealer,
+      };
+    });
+    res.json(response);
+  } catch (err) {
+    console.error("Error in expfwdLinkingBookings:", err);
+    res
+      .status(500)
+      .json({ error: "Failed to fetch expfwdLinkingBookings data" });
+  }
+};
+// GET /api/exposures/expfwdLinking
+const expfwdLinking = async (req, res) => {
+  try {
+    // 0. Get current user session and allowed buNames
+    const session = globalSession.UserSessions[0];
+    if (!session) {
+      return res.status(404).json({ error: "No active session found" });
+    }
+    const userId = session.userId;
+    const userResult = await pool.query(
+      "SELECT business_unit_name FROM users WHERE id = $1",
+      [userId]
+    );
+    if (!userResult.rows.length) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const userBu = userResult.rows[0].business_unit_name;
+    if (!userBu) {
+      return res.status(404).json({ error: "User has no business unit assigned" });
+    }
+    const entityResult = await pool.query(
+      "SELECT entity_id FROM masterEntity WHERE entity_name = $1 AND (approval_status = 'Approved' OR approval_status = 'approved') AND (is_deleted = false OR is_deleted IS NULL)",
+      [userBu]
+    );
+    if (!entityResult.rows.length) {
+      return res.status(404).json({ error: "Business unit entity not found" });
+    }
+    const rootEntityId = entityResult.rows[0].entity_id;
+    const descendantsResult = await pool.query(
+      `WITH RECURSIVE descendants AS (
+        SELECT entity_id, entity_name FROM masterEntity WHERE entity_id = $1
+        UNION ALL
+        SELECT me.entity_id, me.entity_name
+        FROM masterEntity me
+        INNER JOIN entityRelationships er ON me.entity_id = er.child_entity_id
+        INNER JOIN descendants d ON er.parent_entity_id = d.entity_id
+        WHERE (me.approval_status = 'Approved' OR me.approval_status = 'approved') AND (me.is_deleted = false OR me.is_deleted IS NULL)
+      )
+      SELECT entity_name FROM descendants`,
+      [rootEntityId]
+    );
+    const buNames = descendantsResult.rows.map((r) => r.entity_name);
+    if (!buNames.length) {
+      return res.status(404).json({ error: "No accessible business units found" });
+    }
+
+    // 1. Get all exposure headers
+    const headersResult = await pool.query(`
+      SELECT exposure_header_id, entity, exposure_type, currency, document_date, total_open_amount, counterparty_name
+      FROM exposure_headers
+      WHERE approval_status = 'Approved' OR approval_status = 'approved'
+    `);
+    const headers = headersResult.rows.filter((h) => buNames.includes(h.entity));
+
+    // 2. Get hedge amounts for all exposure_header_ids
+    const headerIds = headers.map((h) => h.exposure_header_id);
+    let hedgeLinks = [];
+    if (headerIds.length > 0) {
+      const hedgeResult = await pool.query(
+        `SELECT exposure_header_id, SUM(hedged_amount) AS hedge_amount
+         FROM exposure_hedge_links
+         WHERE exposure_header_id = ANY($1)
+         GROUP BY exposure_header_id`,
+        [headerIds]
+      );
+      hedgeLinks = hedgeResult.rows;
+    }
+    const hedgeMap = {};
+    for (const row of hedgeLinks) {
+      hedgeMap[row.exposure_header_id] = Number(row.hedge_amount) || 0;
+    }
+
+    // 3. Get bu unit compliance (bu-wise compliance, check with entity)
+    // Use logic from getRenderVars: get all approved, not deleted entity names
+    const buResult = await pool.query(
+      `SELECT entity_id, entity_name FROM masterEntity WHERE (approval_status = 'Approved' OR approval_status = 'approved') AND (is_deleted = false OR is_deleted IS NULL)`
+    );
+    const buCompliance = {};
+    for (const row of buResult.rows) {
+      buCompliance[row.entity_name] = true;
+    }
+
+    // 4. Build response
+    const response = headers.map((h) => {
+      const hedgeAmount =
+        hedgeMap[h.exposure_header_id] &&
+        hedgeMap[h.exposure_header_id] < Number(h.total_open_amount)
+          ? hedgeMap[h.exposure_header_id]
+          : 0;
+      return {
+        bu: h.entity,
+        exposure_header_id: h.exposure_header_id,
+        type: h.exposure_type,
+        currency: h.currency,
+        maturity_date: h.document_date,
+        amount: h.total_open_amount,
+        hedge_amount: hedgeAmount,
+        bu_unit_compliance: !!buCompliance[h.entity],
+        Bank: h.counterparty_name,
+      };
+    });
+    res.json(response);
+  } catch (err) {
+    console.error("Error in expfwdLinking:", err);
+    res.status(500).json({ error: "Failed to fetch expfwdLinking data" });
+  }
+};
 // GET /api/exposures/maturity-expiry-count-7days-headers
 const getMaturityExpiryCount7DaysFromHeaders = async (req, res) => {
   try {
