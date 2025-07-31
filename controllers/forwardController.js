@@ -1,3 +1,26 @@
+// Link exposure to hedge booking
+async function linkExposureHedge(req, res) {
+  try {
+    const { exposure_header_id, booking_id, hedged_amount } = req.body;
+    if (!exposure_header_id || !booking_id || !hedged_amount) {
+      return res.status(400).json({ error: "exposure_header_id, booking_id, and hedged_amount are required" });
+    }
+    // Upsert logic: if link exists, update; else insert
+    const upsertQuery = `
+      INSERT INTO exposure_hedge_links (exposure_header_id, booking_id, hedged_amount, is_active)
+      VALUES ($1, $2, $3, true)
+      ON CONFLICT (exposure_header_id, booking_id)
+      DO UPDATE SET hedged_amount = EXCLUDED.hedged_amount, is_active = true
+      RETURNING *
+    `;
+    const values = [exposure_header_id, booking_id, hedged_amount];
+    const result = await pool.query(upsertQuery, values);
+    res.status(200).json({ success: true, link: result.rows[0] });
+  } catch (err) {
+    console.error("linkExposureHedge error:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+}
 // Multi-file upload for forward confirmations (CSV/Excel) - UPDATE existing records
 async function uploadForwardConfirmationsMulti(req, res) {
   if (!req.files || req.files.length === 0) {
@@ -606,10 +629,73 @@ async function addForwardBookingManualEntry(req, res) {
   }
 }
 
+// Get all forward_bookings relevant to user's accessible enti
+async function getEntityRelevantForwardBookings(req, res) {
+  try {
+    const globalSession = require("../globalSession");
+    const session = globalSession.UserSessions[0];
+    if (!session) {
+      return res.status(404).json({ error: "No active session found" });
+    }
+    const userId = session.userId;
+    let buNames = [];
+    try {
+      const userResult = await pool.query(
+        "SELECT business_unit_name FROM users WHERE id = $1",
+        [userId]
+      );
+      if (!userResult.rows.length) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      const userBu = userResult.rows[0].business_unit_name;
+      if (!userBu) {
+        return res.status(404).json({ error: "User has no business unit assigned" });
+      }
+      const entityResult = await pool.query(
+        "SELECT entity_id FROM masterEntity WHERE entity_name = $1 AND (approval_status = 'Approved' OR approval_status = 'approved') AND (is_deleted = false OR is_deleted IS NULL)",
+        [userBu]
+      );
+      if (!entityResult.rows.length) {
+        return res.status(404).json({ error: "Business unit entity not found" });
+      }
+      const rootEntityId = entityResult.rows[0].entity_id;
+      const descendantsResult = await pool.query(
+        `WITH RECURSIVE descendants AS (
+          SELECT entity_id, entity_name FROM masterEntity WHERE entity_id = $1
+          UNION ALL
+          SELECT me.entity_id, me.entity_name
+          FROM masterEntity me
+          INNER JOIN entityRelationships er ON me.entity_id = er.child_entity_id
+          INNER JOIN descendants d ON er.parent_entity_id = d.entity_id
+          WHERE (me.approval_status = 'Approved' OR me.approval_status = 'approved') AND (me.is_deleted = false OR me.is_deleted IS NULL)
+        )
+        SELECT entity_name FROM descendants`,
+        [rootEntityId]
+      );
+      buNames = descendantsResult.rows.map((r) => r.entity_name);
+      if (!buNames.length) {
+        return res.status(404).json({ error: "No accessible business units found" });
+      }
+    } catch (err) {
+      console.error("Error fetching allowed business units:", err);
+      return res.status(500).json({ error: "Failed to fetch allowed business units" });
+    }
+    // Query all forward_bookings for accessible entities
+    const query = `SELECT * FROM forward_bookings WHERE entity_level_0 = ANY($1)`;
+    const result = await pool.query(query, [buNames]);
+    res.status(200).json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error("getEntityRelevantForwardBookings error:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+}
+
 module.exports = {
   addForwardBookingManualEntry,
   upload,
   uploadForwardBookingsMulti,
   uploadForwardConfirmationsMulti,
   addForwardConfirmationManualEntry,
+  linkExposureHedge,
+  getEntityRelevantForwardBookings,
 };
