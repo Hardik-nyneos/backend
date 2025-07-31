@@ -1,3 +1,52 @@
+// GET /api/forwardDash/bu-maturity-currency-summary
+exports.getBuMaturityCurrencySummaryJoined = async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT entity_level_0, delivery_period, quote_currency, order_type, booking_amount FROM forward_bookings"
+    );
+    const bucketLabels = {
+      month_1: "1 Month",
+      month_2: "2 Month",
+      month_3: "3 Month",
+      month_4: "4 Month",
+      month_4_6: "4-6 Month",
+      month_6plus: "6 Month +",
+    };
+    function normalizeDeliveryPeriod(period) {
+      if (!period) return "month_1";
+      const p = period.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (["1m", "1month", "month1", "m1", "mon1"].includes(p)) return "month_1";
+      if (["2m", "2month", "month2", "m2", "mon2"].includes(p)) return "month_2";
+      if (["3m", "3month", "month3", "m3", "mon3"].includes(p)) return "month_3";
+      if (["4m", "4month", "month4", "m4", "mon4"].includes(p)) return "month_4";
+      if (["46m", "4to6month", "month46", "month4to6", "m46", "mon46", "4_6month", "4_6m", "4-6m", "4-6month"].includes(p)) return "month_4_6";
+      if (["6mplus", "6monthplus", "month6plus", "6plus", "m6plus", "mon6plus", "6m+", "6month+", "month6+"].includes(p)) return "month_6plus";
+      if (p.includes("6")) return "month_6plus";
+      if (p.includes("4")) return "month_4";
+      if (p.includes("3")) return "month_3";
+      if (p.includes("2")) return "month_2";
+      return "month_1";
+    }
+    const summary = {};
+    for (const row of result.rows) {
+      const bu = row.entity_level_0 || "Unknown BU";
+      const bucketKey = normalizeDeliveryPeriod(row.delivery_period);
+      const maturity = bucketLabels[bucketKey] || "1 Month";
+      const currency = (row.quote_currency || "").toUpperCase();
+      const orderType = (row.order_type || "").toLowerCase();
+      const amount = Number(row.booking_amount) || 0;
+      const key = `${bu}__${maturity}__${currency}`;
+      if (!summary[key]) {
+        summary[key] = { bu, maturity, currency, forwardBuy: 0, forwardSell: 0 };
+      }
+      if (orderType === "buy") summary[key].forwardBuy += amount;
+      else summary[key].forwardSell += amount;
+    }
+    res.json(Object.values(summary));
+  } catch (err) {
+    res.status(500).json({ error: "Error fetching summary", details: err.message });
+  }
+};
 // GET /api/forwardDash/active-forwards
 exports.getActiveForwardsCount = async (req, res) => {
   try {
