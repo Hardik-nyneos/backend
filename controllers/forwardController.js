@@ -856,6 +856,7 @@ async function bulkUpdateForwardBookingProcessingStatus(req, res) {
 }
 
 module.exports = {
+   getLinkedSummaryByCategory,
   addForwardBookingManualEntry,
   upload,
   uploadForwardBookingsMulti,
