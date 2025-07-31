@@ -28,4 +28,10 @@ router.get(
   forwardDashController.getRecentTradesDashboard
 );
 router.get("/active-forwards", forwardDashController.getActiveForwardsCount);
+
+router.get(
+  "/bu-maturity-currency-summary",
+  forwardDashController.getBuMaturityCurrencySummaryJoined
+);
+
 module.exports = router;
