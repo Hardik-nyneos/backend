@@ -1863,7 +1863,7 @@ const getPendingApprovalHeadersLineItems = async (req, res) => {
       `SELECT h.*, l.*
        FROM exposure_headers h
        JOIN exposure_line_items l ON h.exposure_header_id = l.exposure_header_id
-       WHERE h.entity = ANY($1) AND (h.approval_status = 'pending' OR h.approval_status = 'Pending')`,
+       WHERE h.entity = ANY($1) AND h.approval_status NOT IN ('Approved', 'approved')`,
       [buNames]
     );
 
