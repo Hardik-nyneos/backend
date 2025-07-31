@@ -97,9 +97,19 @@ const getHedgingProposalsAggregated = async (req, res) => {
       return res.status(404).json({ error: "No accessible business units found" });
     }
 
+    await pool.query(
+  `INSERT INTO hedging_proposal (exposure_header_id)
+   SELECT exposure_header_id
+   FROM exposure_headers
+   WHERE entity = ANY($1)
+     AND exposure_header_id NOT IN (
+       SELECT exposure_header_id FROM hedging_proposal
+     )`,
+  [buNames]
+);
     // 4. Join exposure_headers, exposure_line_items, exposure_bucketing, hedging_proposal
     // Only include headers where bucketing.status = 'approved'
-
+    
     const query = `
       SELECT 
         h.entity AS business_unit,
@@ -119,9 +129,9 @@ const getHedgingProposalsAggregated = async (req, res) => {
         SUM(COALESCE(b.old_month4to6, 0)) AS old_hedge_month4to6,
         SUM(COALESCE(b.old_month6plus, 0)) AS old_hedge_month6plus,
         MAX(hp.comments) AS comments,
-        MAX(hp.status) AS status
+        MAX(hp.status_hedging) AS status
       FROM exposure_headers h
-      JOIN exposure_bucketing b ON h.exposure_header_id = b.exposure_header_id AND (b.status = 'approved' OR b.status = 'Approved')
+      JOIN exposure_bucketing b ON h.exposure_header_id = b.exposure_header_id AND (b.status_bucketing = 'approved' OR b.status_bucketing = 'Approved')
       JOIN exposure_line_items l ON h.exposure_header_id = l.exposure_header_id
       LEFT JOIN hedging_proposal hp ON h.exposure_header_id = hp.exposure_header_id
       WHERE h.entity = ANY($1)
