@@ -17,4 +17,8 @@ router.post('/forward-confirmations/manual-entry', forwardController.addForwardC
 
 // Multi-file upload for forward confirmations (CSV/Excel)
 router.post('/forward-confirmations/upload-multi', forwardController.upload.array('files'), forwardController.uploadForwardConfirmationsMulti);
+// Change processing_status to Approved or Rejected for a forward booking
+router.post('/forward-bookings/update-processing-status', forwardController.updateForwardBookingProcessingStatus);
+// Bulk approve/reject forward bookings
+router.post('/forward-bookings/bulk-update-processing-status', forwardController.bulkUpdateForwardBookingProcessingStatus);
 module.exports = router;
