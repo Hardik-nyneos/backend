@@ -6,6 +6,11 @@ const express = require('express');
 const router = express.Router();
 const forwardController = require('../controllers/forwardController');
 
+router.get(
+  "/linked-summary-by-category",
+  forwardController.getLinkedSummaryByCategory
+);
+
 // Manual entry for forward bookings
 router.post('/forward-bookings/manual-entry', forwardController.addForwardBookingManualEntry);
 // Get all forward_bookings relevant to user's accessible entities
