@@ -1,3 +1,89 @@
+// GET /api/forward/linkedSummaryByCategory
+async function getLinkedSummaryByCategory(req, res) {
+  try {
+    // 1. Fwd Booking
+    const fwdBookingRes = await pool.query(`
+      SELECT * FROM forward_bookings
+    `);
+    const fwdBooking = fwdBookingRes.rows.map(row => ({
+      entity_level_0: row.entity_level_0,
+      entity_level_1: row.entity_level_1,
+      entity_level_2: row.entity_level_2,
+      entity_level_3: row.entity_level_3,
+      local_currency: row.local_currency,
+      order_type: row.order_type,
+      transaction_type: row.transaction_type,
+      counterparty: row.counterparty,
+      mode_of_delivery: row.mode_of_delivery,
+      delivery_period: row.delivery_period,
+      add_date: row.add_date,
+      settlement_date: row.settlement_date,
+      maturity_date: row.maturity_date,
+      delivery_date: row.delivery_date,
+      currency_pair: row.currency_pair,
+      base_currency: row.base_currency,
+      quote_currency: row.quote_currency,
+      booking_amount: row.booking_amount,
+      value_type: row.value_type,
+      actual_value_base_currency: row.actual_value_base_currency,
+      spot_rate: row.spot_rate,
+      forward_points: row.forward_points,
+      bank_margin: row.bank_margin,
+      total_rate: row.total_rate,
+      value_quote_currency: row.value_quote_currency,
+      intervening_rate_quote_to_local: row.intervening_rate_quote_to_local,
+    }));
+
+    // 2. Fwd Rollovers (join to forward_bookings for entity fields)
+    const rollRes = await pool.query(`
+      SELECT r.*, b.entity_level_0, b.entity_level_1, b.entity_level_2, b.entity_level_3
+      FROM forward_rollovers r
+      LEFT JOIN forward_bookings b ON r.booking_id = b.system_transaction_id
+    `);
+    const fwdRollovers = rollRes.rows.map(row => ({
+      rollover_id: row.rollover_id,
+      booking_id: row.booking_id,
+      entity_level_0: row.entity_level_0,
+      entity_level_1: row.entity_level_1,
+      entity_level_2: row.entity_level_2,
+      entity_level_3: row.entity_level_3,
+      amount_rolled_over: row.amount_rolled_over,
+      rollover_date: row.rollover_date,
+      original_maturity_date: row.original_maturity_date,
+      new_maturity_date: row.new_maturity_date,
+      rollover_cost: row.rollover_cost,
+    }));
+
+    // 3. Fwd Cancellation (join to forward_bookings for entity fields)
+    const cancelRes = await pool.query(`
+      SELECT c.*, b.entity_level_0, b.entity_level_1, b.entity_level_2, b.entity_level_3
+      FROM forward_cancellations c
+      LEFT JOIN forward_bookings b ON c.booking_id = b.system_transaction_id
+    `);
+    const fwdCancellation = cancelRes.rows.map(row => ({
+      entity_level_0: row.entity_level_0,
+      entity_level_1: row.entity_level_1,
+      entity_level_2: row.entity_level_2,
+      entity_level_3: row.entity_level_3,
+      cancellation_id: row.cancellation_id,
+      booking_id: row.booking_id,
+      amount_cancelled: row.amount_cancelled,
+      cancellation_date: row.cancellation_date,
+      cancellation_rate: row.cancellation_rate,
+      realized_gain_loss: row.realized_gain_loss,
+      cancellation_reason: row.cancellation_reason,
+    }));
+
+    res.json({
+      "Fwd Booking": fwdBooking,
+      "Fwd Rollovers": fwdRollovers,
+      "Fwd Cancellation": fwdCancellation,
+    });
+  } catch (err) {
+    console.error("getLinkedSummaryByCategory error:", err);
+    res.status(500).json({ error: "Failed to fetch linked summary by category" });
+  }
+}
 // Link exposure to hedge booking
 async function linkExposureHedge(req, res) {
   try {
