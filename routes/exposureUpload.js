@@ -116,6 +116,16 @@ router.post(
 );
 
 //----------------------------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------------------------
+
+router.get("/expfwdLinking", exposureUploadController.expfwdLinking);
+router.get(
+  "/expfwdLinkingBookings",
+  exposureUploadController.expfwdLinkingBookings
+);
+router.get("/hedgeLinksDetails", exposureUploadController.hedgeLinksDetails);
+//-------------------------------------------------------------------------------------------------------
+
 router.post(
   "/upload-csv",
   upload.single("file"),
