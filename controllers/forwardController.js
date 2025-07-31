@@ -690,6 +690,48 @@ async function getEntityRelevantForwardBookings(req, res) {
   }
 }
 
+// Change processing_status to Approved or Rejected for a forward booking
+async function updateForwardBookingProcessingStatus(req, res) {
+  try {
+    const { system_transaction_id, processing_status } = req.body;
+    if (!system_transaction_id || !['Approved', 'Rejected'].includes(processing_status)) {
+      return res.status(400).json({ error: "system_transaction_id and valid processing_status (Approved/Rejected) required" });
+    }
+    const query = `UPDATE forward_bookings SET processing_status = $1 WHERE system_transaction_id = $2 RETURNING *`;
+    const values = [processing_status, system_transaction_id];
+    const result = await pool.query(query, values);
+    if (result.rowCount > 0) {
+      res.status(200).json({ success: true, updated: result.rows[0] });
+    } else {
+      res.status(404).json({ success: false, error: "No matching forward booking found" });
+    }
+  } catch (err) {
+    console.error("updateForwardBookingProcessingStatus error:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+}
+
+// Bulk approve/reject forward bookings
+async function bulkUpdateForwardBookingProcessingStatus(req, res) {
+  try {
+    const { system_transaction_ids, processing_status } = req.body;
+    if (!Array.isArray(system_transaction_ids) || system_transaction_ids.length === 0 || !['Approved', 'Rejected'].includes(processing_status)) {
+      return res.status(400).json({ error: "system_transaction_ids (array) and valid processing_status (Approved/Rejected) required" });
+    }
+    const query = `UPDATE forward_bookings SET processing_status = $1 WHERE system_transaction_id = ANY($2) RETURNING *`;
+    const values = [processing_status, system_transaction_ids];
+    const result = await pool.query(query, values);
+    if (result.rowCount > 0) {
+      res.status(200).json({ success: true, updated: result.rows });
+    } else {
+      res.status(404).json({ success: false, error: "No matching forward bookings found" });
+    }
+  } catch (err) {
+    console.error("bulkUpdateForwardBookingProcessingStatus error:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+}
+
 module.exports = {
   addForwardBookingManualEntry,
   upload,
@@ -698,4 +740,6 @@ module.exports = {
   addForwardConfirmationManualEntry,
   linkExposureHedge,
   getEntityRelevantForwardBookings,
+  updateForwardBookingProcessingStatus,
+  bulkUpdateForwardBookingProcessingStatus,
 };
