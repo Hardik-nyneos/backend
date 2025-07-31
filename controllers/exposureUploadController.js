@@ -2148,6 +2148,9 @@ const getPendingApprovalHeadersLineItems = async (req, res) => {
 };
 
 module.exports = {
+  hedgeLinksDetails,
+  expfwdLinkingBookings,
+  expfwdLinking,
   getUserVars,
   getRenderVars,
   getUserJourney,
