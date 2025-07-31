@@ -461,7 +461,6 @@ const getupdate = async (req, res) => {
   }
 };
 
-// New function: getExposureHeadersLineItemsBucketing
 const getExposureHeadersLineItemsBucketing = async (req, res) => {
   try {
     // 1. Get current user session
@@ -507,7 +506,7 @@ const getExposureHeadersLineItemsBucketing = async (req, res) => {
         WHERE (me.approval_status = 'Approved' OR me.approval_status = 'approved') AND (me.is_deleted = false OR me.is_deleted IS NULL)
       )
       SELECT entity_name FROM descendants
-    `,
+      `,
       [rootEntityId]
     );
     const buNames = descendantsResult.rows.map((r) => r.entity_name);
@@ -517,7 +516,20 @@ const getExposureHeadersLineItemsBucketing = async (req, res) => {
         .json({ error: "No accessible business units found" });
     }
 
-    // 4. Join exposure_headers, exposure_line_items, and exposure_bucketing
+    // 4. Ensure all exposure_header_id are present in exposure_bucketing
+    await pool.query(
+      `INSERT INTO exposure_bucketing (exposure_header_id)
+       SELECT exposure_header_id
+       FROM exposure_headers
+       WHERE entity = ANY($1)
+         AND (approval_status = 'approved' OR approval_status = 'Approved')
+         AND exposure_header_id NOT IN (
+           SELECT exposure_header_id FROM exposure_bucketing
+         )`,
+      [buNames]
+    );
+
+    // 5. Join exposure_headers, exposure_line_items, and exposure_bucketing
     const joinResult = await pool.query(
       `SELECT h.*, l.*, b.*
        FROM exposure_headers h
@@ -583,7 +595,6 @@ const getExposureHeadersLineItemsBucketing = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch joined exposures" });
   }
 };
-
 // Approve exposure_bucketing rows (status only, no delete logic, updated columns)
 const approveBucketingStatus = async (req, res) => {
   const { exposure_header_ids, updated_by, comments } = req.body;
