@@ -89,7 +89,7 @@ const updateExposureHeadersLineItemsBucketing = async (req, res) => {
       const result = await pool.query(query, [...values, exposure_header_id]);
       // Set status to 'Pending' if any change
       await pool.query(
-        `UPDATE exposure_bucketing SET status = 'pending' WHERE exposure_header_id = $1`,
+        `UPDATE exposure_bucketing SET status_bucketing = 'pending' WHERE exposure_header_id = $1`,
         [exposure_header_id]
       );
       if (result.rowCount > 0) updated.bucketing = result.rows;
