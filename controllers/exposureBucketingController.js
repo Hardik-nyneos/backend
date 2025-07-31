@@ -613,12 +613,12 @@ const approveBucketingStatus = async (req, res) => {
   try {
     const { rows: updated } = await pool.query(
       `UPDATE exposure_bucketing
-       SET status = 'approved', updated_by = $2, comments = $3, updated_at = NOW()
+       SET status_bucketing = 'Approved', updated_by = $2, comments = $3, updated_at = NOW()
        WHERE exposure_header_id = ANY($1)
        RETURNING *`,
       [exposure_header_ids, updated_by, comments || null]
     );
-    res.status(200).json({ success: true, approved: updated });
+    res.status(200).json({ success: true, Approved: updated });
   } catch (err) {
     console.error("approveBucketingStatus error:", err);
     res.status(500).json({ success: false, error: err.message });
@@ -643,12 +643,12 @@ const rejectBucketingStatus = async (req, res) => {
   try {
     const { rows: updated } = await pool.query(
       `UPDATE exposure_bucketing
-       SET status = 'rejected', updated_by = $2, comments = $3, updated_at = NOW()
+       SET status_bucketing = 'Rejected', updated_by = $2, comments = $3, updated_at = NOW()
        WHERE exposure_header_id = ANY($1)
        RETURNING *`,
       [exposure_header_ids, updated_by, comments || null]
     );
-    res.status(200).json({ success: true, rejected: updated });
+    res.status(200).json({ success: true, Rejected: updated });
   } catch (err) {
     console.error("rejectBucketingStatus error:", err);
     res.status(500).json({ success: false, error: err.message });
