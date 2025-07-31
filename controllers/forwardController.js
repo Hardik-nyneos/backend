@@ -1,10 +1,61 @@
 // GET /api/forward/linkedSummaryByCategory
 async function getLinkedSummaryByCategory(req, res) {
   try {
-    // 1. Fwd Booking
-    const fwdBookingRes = await pool.query(`
-      SELECT * FROM forward_bookings
-    `);
+    // --- Get allowed business units for user (same as uploadForwardConfirmationsMulti) ---
+    const globalSession = require("../globalSession");
+    const session = globalSession.UserSessions[0];
+    if (!session) {
+      return res.status(404).json({ error: "No active session found" });
+    }
+    const userId = session.userId;
+    let buNames = [];
+    try {
+      const userResult = await pool.query(
+        "SELECT business_unit_name FROM users WHERE id = $1",
+        [userId]
+      );
+      if (!userResult.rows.length) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      const userBu = userResult.rows[0].business_unit_name;
+      if (!userBu) {
+        return res.status(404).json({ error: "User has no business unit assigned" });
+      }
+      const entityResult = await pool.query(
+        "SELECT entity_id FROM masterEntity WHERE entity_name = $1 AND (approval_status = 'Approved' OR approval_status = 'approved') AND (is_deleted = false OR is_deleted IS NULL)",
+        [userBu]
+      );
+      if (!entityResult.rows.length) {
+        return res.status(404).json({ error: "Business unit entity not found" });
+      }
+      const rootEntityId = entityResult.rows[0].entity_id;
+      const descendantsResult = await pool.query(
+        `WITH RECURSIVE descendants AS (
+          SELECT entity_id, entity_name FROM masterEntity WHERE entity_id = $1
+          UNION ALL
+          SELECT me.entity_id, me.entity_name
+          FROM masterEntity me
+          INNER JOIN entityRelationships er ON me.entity_id = er.child_entity_id
+          INNER JOIN descendants d ON er.parent_entity_id = d.entity_id
+          WHERE (me.approval_status = 'Approved' OR me.approval_status = 'approved') AND (me.is_deleted = false OR me.is_deleted IS NULL)
+        )
+        SELECT entity_name FROM descendants`,
+        [rootEntityId]
+      );
+      buNames = descendantsResult.rows.map((r) => r.entity_name);
+      if (!buNames.length) {
+        return res.status(404).json({ error: "No accessible business units found" });
+      }
+    } catch (err) {
+      console.error("Error fetching allowed business units:", err);
+      return res.status(500).json({ error: "Failed to fetch allowed business units" });
+    }
+
+    // 1. Fwd Booking (filter by buNames)
+    const fwdBookingRes = await pool.query(
+      `SELECT * FROM forward_bookings WHERE entity_level_0 = ANY($1)`,
+      [buNames]
+    );
     const fwdBooking = fwdBookingRes.rows.map(row => ({
       entity_level_0: row.entity_level_0,
       entity_level_1: row.entity_level_1,
@@ -34,12 +85,14 @@ async function getLinkedSummaryByCategory(req, res) {
       intervening_rate_quote_to_local: row.intervening_rate_quote_to_local,
     }));
 
-    // 2. Fwd Rollovers (join to forward_bookings for entity fields)
-    const rollRes = await pool.query(`
-      SELECT r.*, b.entity_level_0, b.entity_level_1, b.entity_level_2, b.entity_level_3
+    // 2. Fwd Rollovers (join to forward_bookings for entity fields, filter by buNames)
+    const rollRes = await pool.query(
+      `SELECT r.*, b.entity_level_0, b.entity_level_1, b.entity_level_2, b.entity_level_3
       FROM forward_rollovers r
       LEFT JOIN forward_bookings b ON r.booking_id = b.system_transaction_id
-    `);
+      WHERE b.entity_level_0 = ANY($1)`,
+      [buNames]
+    );
     const fwdRollovers = rollRes.rows.map(row => ({
       rollover_id: row.rollover_id,
       booking_id: row.booking_id,
@@ -54,12 +107,14 @@ async function getLinkedSummaryByCategory(req, res) {
       rollover_cost: row.rollover_cost,
     }));
 
-    // 3. Fwd Cancellation (join to forward_bookings for entity fields)
-    const cancelRes = await pool.query(`
-      SELECT c.*, b.entity_level_0, b.entity_level_1, b.entity_level_2, b.entity_level_3
+    // 3. Fwd Cancellation (join to forward_bookings for entity fields, filter by buNames)
+    const cancelRes = await pool.query(
+      `SELECT c.*, b.entity_level_0, b.entity_level_1, b.entity_level_2, b.entity_level_3
       FROM forward_cancellations c
       LEFT JOIN forward_bookings b ON c.booking_id = b.system_transaction_id
-    `);
+      WHERE b.entity_level_0 = ANY($1)`,
+      [buNames]
+    );
     const fwdCancellation = cancelRes.rows.map(row => ({
       entity_level_0: row.entity_level_0,
       entity_level_1: row.entity_level_1,
