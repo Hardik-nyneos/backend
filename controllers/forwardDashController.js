@@ -245,16 +245,24 @@ exports.getBankTradesData = async (req, res) => {
       const currency = (row.quote_currency || '').toUpperCase();
       const rate = rates[currency] || 1.0;
       const amountUsd = amount * rate;
-      const formattedAmount = isNaN(amountUsd)
-        ? "$0"
-        : `$${amountUsd.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
       if (!bankMap[bank]) {
-        bankMap[bank] = { bank, trades: [], amounts: [] };
+        bankMap[bank] = { bank, trades: {} };
       }
-      bankMap[bank].trades.push(trade);
-      bankMap[bank].amounts.push(formattedAmount);
+      if (!bankMap[bank].trades[trade]) {
+        bankMap[bank].trades[trade] = 0;
+      }
+      bankMap[bank].trades[trade] += amountUsd;
     }
-    const forwardsData = Object.values(bankMap);
+    // Format output: for each bank, list unique trades and summed formatted amounts
+    const forwardsData = Object.values(bankMap).map(b => ({
+      bank: b.bank,
+      trades: Object.keys(b.trades),
+      amounts: Object.values(b.trades).map(amt =>
+        amt >= 1e6 ? `$${(amt / 1e6).toFixed(1)}M` :
+        amt >= 1e3 ? `$${(amt / 1e3).toFixed(1)}K` :
+        `$${amt.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+      )
+    }));
     res.json(forwardsData);
   } catch (err) {
     res
