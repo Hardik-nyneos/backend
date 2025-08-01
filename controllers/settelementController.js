@@ -78,7 +78,12 @@ async function filterForwardBookingsForSettlement(req, res) {
       JOIN forward_bookings fb ON ehl.booking_id = fb.system_transaction_id
       WHERE ehl.exposure_header_id = ANY($1)
         AND fb.quote_currency = $2
-        AND fb.entity_level_3 = $3
+        AND (
+          fb.entity_level_0 = $3
+          OR fb.entity_level_1 = $3
+          OR fb.entity_level_2 = $3
+          OR fb.entity_level_3 = $3
+        )
         AND fb.status = 'Confirmed'
         AND (
           fb.entity_level_0 = ANY($4)
