@@ -1,12 +1,61 @@
-// GET /api/exposures/hedgeLinksDetails
 const hedgeLinksDetails = async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT l.*, h.document_id, f.internal_reference_id
-      FROM exposure_hedge_links l
-      LEFT JOIN exposure_headers h ON l.exposure_header_id = h.exposure_header_id
-      LEFT JOIN forward_bookings f ON l.booking_id = f.system_transaction_id
-    `);
+    // 0. Get current user session and allowed buNames (same as expfwdLinkingBookings)
+    const session = globalSession.UserSessions[0];
+    if (!session) {
+      return res.status(404).json({ error: "No active session found" });
+    }
+    const userId = session.userId;
+    const userResult = await pool.query(
+      "SELECT business_unit_name FROM users WHERE id = $1",
+      [userId]
+    );
+    if (!userResult.rows.length) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const userBu = userResult.rows[0].business_unit_name;
+    if (!userBu) {
+      return res
+        .status(404)
+        .json({ error: "User has no business unit assigned" });
+    }
+    const entityResult = await pool.query(
+      "SELECT entity_id FROM masterEntity WHERE entity_name = $1 AND (approval_status = 'Approved' OR approval_status = 'approved') AND (is_deleted = false OR is_deleted IS NULL)",
+      [userBu]
+    );
+    if (!entityResult.rows.length) {
+      return res.status(404).json({ error: "Business unit entity not found" });
+    }
+    const rootEntityId = entityResult.rows[0].entity_id;
+    const descendantsResult = await pool.query(
+      `WITH RECURSIVE descendants AS (
+        SELECT entity_id, entity_name FROM masterEntity WHERE entity_id = $1
+        UNION ALL
+        SELECT me.entity_id, me.entity_name
+        FROM masterEntity me
+        INNER JOIN entityRelationships er ON me.entity_id = er.child_entity_id
+        INNER JOIN descendants d ON er.parent_entity_id = d.entity_id
+        WHERE (me.approval_status = 'Approved' OR me.approval_status = 'approved') AND (me.is_deleted = false OR me.is_deleted IS NULL)
+      )
+      SELECT entity_name FROM descendants`,
+      [rootEntityId]
+    );
+    const buNames = descendantsResult.rows.map((r) => r.entity_name);
+    if (!buNames.length) {
+      return res
+        .status(404)
+        .json({ error: "No accessible business units found" });
+    }
+
+    // Query exposure_hedge_links joined to exposure_headers, filter by buNames
+    const result = await pool.query(
+      `SELECT l.*, h.document_id, f.internal_reference_id
+       FROM exposure_hedge_links l
+       LEFT JOIN exposure_headers h ON l.exposure_header_id = h.exposure_header_id
+       LEFT JOIN forward_bookings f ON l.booking_id = f.system_transaction_id
+       WHERE h.entity = ANY($1) AND l.is_active = TRUE`,
+      [buNames]
+    );
     res.json(result.rows);
   } catch (err) {
     console.error("Error in hedgeLinksDetails:", err);
