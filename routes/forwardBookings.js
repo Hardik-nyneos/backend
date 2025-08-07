@@ -10,7 +10,7 @@ router.get(
   "/linked-summary-by-category",
   forwardController.getLinkedSummaryByCategory
 );
-
+router.get('/exposure/summary', forwardController.getExposureSummary);
 // Manual entry for forward bookings
 router.post('/forward-bookings/manual-entry', forwardController.addForwardBookingManualEntry);
 // Get all forward_bookings relevant to user's accessible entities
