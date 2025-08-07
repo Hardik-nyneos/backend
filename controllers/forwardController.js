@@ -921,4 +921,72 @@ module.exports = {
   getEntityRelevantForwardBookings,
   updateForwardBookingProcessingStatus,
   bulkUpdateForwardBookingProcessingStatus,
+  updateForwardBookingFields,
 };
+
+async function updateForwardBookingFields(req, res) {
+  try {
+    const { system_transaction_id } = req.params;
+    const fields = req.body;
+    if (!system_transaction_id) {
+      return res
+        .status(400)
+        .json({ error: "system_transaction_id is required in params" });
+    }
+    if (
+      !fields ||
+      typeof fields !== "object" ||
+      Object.keys(fields).length === 0
+    ) {
+      return res
+        .status(400)
+        .json({
+          error: "At least one field to update must be provided in body",
+        });
+    }
+    // Check if booking exists
+    const bookingRes = await pool.query(
+      "SELECT * FROM forward_bookings WHERE system_transaction_id = $1",
+      [system_transaction_id]
+    );
+    if (!bookingRes.rows.length) {
+      return res
+        .status(404)
+        .json({ error: "No matching forward booking found" });
+    }
+    // Get valid columns for forward_bookings
+    const colRes = await pool.query(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'forward_bookings'`
+    );
+    const validCols = colRes.rows.map((r) => r.column_name);
+    // Filter fields to only valid columns (ignore system_transaction_id)
+    const updateFields = {};
+    for (const key of Object.keys(fields)) {
+      if (validCols.includes(key) && key !== "system_transaction_id") {
+        updateFields[key] = fields[key];
+      }
+    }
+    // Always set processing_status to 'pending' on any update
+    updateFields["processing_status"] = "pending";
+    if (Object.keys(updateFields).length === 0) {
+      return res.status(400).json({ error: "No valid fields to update" });
+    }
+    // Build dynamic SET clause
+    const keys = Object.keys(updateFields);
+    const setClause = keys.map((k, i) => `${k} = $${i + 1}`).join(", ");
+    const values = keys.map((k) => updateFields[k]);
+    values.push(system_transaction_id);
+    const updateQuery = `UPDATE forward_bookings SET ${setClause} WHERE system_transaction_id = $${
+      keys.length + 1
+    } RETURNING *`;
+    const result = await pool.query(updateQuery, values);
+    if (result.rowCount > 0) {
+      res.status(200).json({ success: true, updated: result.rows[0] });
+    } else {
+      return res.status(404).json({ error: "No matching forward booking found" });
+    }
+  } catch (err) {
+    console.error("updateForwardBookingFields error:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+}
