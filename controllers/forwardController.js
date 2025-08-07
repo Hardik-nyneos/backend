@@ -1,3 +1,107 @@
+// GET /api/exposure/summary
+async function getExposureSummary(req, res) {
+  try {
+    // Get current user session (first/only session)
+    const globalSession = require("../globalSession");
+    const session = globalSession.UserSessions[0];
+    if (!session) {
+      return res.status(404).json({ error: "No active session found" });
+    }
+    const userId = session.userId;
+    // Get user's business unit name
+    const userResult = await pool.query(
+      "SELECT business_unit_name FROM users WHERE id = $1",
+      [userId]
+    );
+    if (!userResult.rows.length) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const userBu = userResult.rows[0].business_unit_name;
+    if (!userBu) {
+      return res.status(404).json({ error: "User has no business unit assigned" });
+    }
+    // Find all descendant business units using recursive CTE
+    const entityResult = await pool.query(
+      "SELECT entity_id FROM masterEntity WHERE entity_name = $1 AND (approval_status = 'Approved' OR approval_status = 'approved') AND (is_deleted = false OR is_deleted IS NULL)",
+      [userBu]
+    );
+    if (!entityResult.rows.length) {
+      return res.status(404).json({ error: "Business unit entity not found" });
+    }
+    const rootEntityId = entityResult.rows[0].entity_id;
+    const descendantsResult = await pool.query(
+      `WITH RECURSIVE descendants AS (
+        SELECT entity_id, entity_name FROM masterEntity WHERE entity_id = $1
+        UNION ALL
+        SELECT me.entity_id, me.entity_name
+        FROM masterEntity me
+        INNER JOIN entityRelationships er ON me.entity_id = er.child_entity_id
+        INNER JOIN descendants d ON er.parent_entity_id = d.entity_id
+        WHERE (me.approval_status = 'Approved' OR me.approval_status = 'approved') AND (me.is_deleted = false OR me.is_deleted IS NULL)
+      )
+      SELECT entity_name FROM descendants`,
+      [rootEntityId]
+    );
+    const buNames = descendantsResult.rows.map((r) => r.entity_name);
+    if (!buNames.length) {
+      return res.status(404).json({ error: "No accessible business units found" });
+    }
+
+    // Get exposure_headers for accessible entities
+    const exposuresRes = await pool.query(
+      `SELECT exposure_header_id, company_code, entity, entity1, entity2, entity3, exposure_type, document_id, document_date, counterparty_name, currency, total_original_amount, total_open_amount, value_date
+       FROM exposure_headers
+       WHERE entity = ANY($1)`,
+      [buNames]
+    );
+    const exposures = exposuresRes.rows;
+
+    // For each exposure, get hedged value and calculate unhedged value
+    const summary = [];
+    for (const exp of exposures) {
+      // Get hedged value for this exposure_header_id
+      const hedgeRes = await pool.query(
+        `SELECT COALESCE(SUM(hedged_amount), 0) AS hedged_value FROM exposure_hedge_links WHERE exposure_header_id = $1`,
+        [exp.exposure_header_id]
+      );
+      const hedgedValue = Number(hedgeRes.rows[0].hedged_value) || 0;
+      const unhedgedValue = (Number(exp.total_open_amount) || 0) - hedgedValue;
+      // Format maturity_month as mm-yy from maturity_date
+      let maturityMonth = null;
+      if (exp.document_date) {
+        const d = new Date(exp.document_date);
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const yy = String(d.getFullYear()).slice(-2);
+        maturityMonth = `${mm}-${yy}`;
+      }
+      summary.push({
+        exposure_header_id: exp.exposure_header_id,
+        company_code: exp.company_code,
+        entity: exp.entity,
+        entity1: exp.entity1,
+        entity2: exp.entity2,
+        entity3: exp.entity3,
+        exposure_type: exp.exposure_type,
+        document_id: exp.document_id,
+        document_date: exp.document_date,
+        // maturity_date: exp.maturity_date,
+        maturity_month: maturityMonth,
+        counterparty_name: exp.counterparty_name,
+        currency: exp.currency,
+        total_original_amount: exp.total_original_amount,
+        total_open_amount: exp.total_open_amount,
+        value_date: exp.value_date,
+        hedged_value: hedgedValue,
+        unhedged_value: unhedgedValue
+      });
+    }
+    res.json({ summary });
+  } catch (err) {
+    console.error("getExposureSummary error:", err);
+    res.status(500).json({ error: "Failed to fetch exposure summary" });
+  }
+}
+
 // Bulk set processing_status to 'Delete-approval' for given system_transaction_ids
 async function bulkDeleteForwardBookings(req, res) {
   try {
@@ -976,6 +1080,7 @@ module.exports = {
    getLinkedSummaryByCategory,
   addForwardBookingManualEntry,
   upload,
+  getExposureSummary,
   uploadForwardBookingsMulti,
   uploadForwardConfirmationsMulti,
   addForwardConfirmationManualEntry,
