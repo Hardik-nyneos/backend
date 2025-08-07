@@ -391,39 +391,111 @@ exports.findParentAtLevel = async (req, res) => {
   }
 };
 
+// exports.getEntityHierarchy = async (req, res) => {
+//   try {
+//     const entitiesResult = await pool.query("SELECT * FROM masterEntity");
+//     const entities = entitiesResult.rows;
+//     const relResult = await pool.query("SELECT * FROM entityRelationships");
+//     const relationships = relResult.rows;
+//     const entityMap = {};
+//     entities.forEach((e) => {
+//       entityMap[e.entity_name] = {
+//         id: e.entity_id,
+//         name: e.entity_name,
+//         data: { ...e },
+//         children: [],
+//       };
+//     });
+//     relationships.forEach((rel) => {
+//       const parent = Object.values(entityMap).find(
+//         (e) => e.id === rel.parent_entity_id
+//       );
+//       const child = Object.values(entityMap).find(
+//         (e) => e.id === rel.child_entity_id
+//       );
+//       if (parent && child) {
+//         parent.children.push(child);
+//       }
+//     });
+//     const topLevel = entities
+//       .filter(
+//         (e) =>
+//           e.is_top_level_entity ||
+//           !relationships.some((rel) => rel.child_entity_id === e.entity_id)
+//       )
+//       .map((e) => entityMap[e.entity_name]);
+
+//     res.json(topLevel);
+//   } catch (err) {
+//     res.status(500).json({ error: err.message });
+//   }
+// };
+
 exports.getEntityHierarchy = async (req, res) => {
   try {
     const entitiesResult = await pool.query("SELECT * FROM masterEntity");
     const entities = entitiesResult.rows;
     const relResult = await pool.query("SELECT * FROM entityRelationships");
     const relationships = relResult.rows;
+    // Build a map of entity_id to entity object
     const entityMap = {};
     entities.forEach((e) => {
-      entityMap[e.entity_name] = {
+      entityMap[e.entity_id] = {
         id: e.entity_id,
         name: e.entity_name,
         data: { ...e },
         children: [],
       };
     });
+    // Build parent-to-children map for traversal
+    const parentMap = {};
     relationships.forEach((rel) => {
-      const parent = Object.values(entityMap).find(
-        (e) => e.id === rel.parent_entity_id
-      );
-      const child = Object.values(entityMap).find(
-        (e) => e.id === rel.child_entity_id
-      );
-      if (parent && child) {
-        parent.children.push(child);
+      if (!parentMap[rel.parent_entity_id])
+        parentMap[rel.parent_entity_id] = [];
+      parentMap[rel.parent_entity_id].push(rel.child_entity_id);
+    });
+    // Find all entity_ids that are deleted or descendants of deleted
+    const deletedIds = new Set(
+      entities.filter((e) => e.is_deleted === true).map((e) => e.entity_id)
+    );
+    // Traverse to get all descendants of deleted entities
+    function getAllDescendants(ids) {
+      const all = new Set(ids);
+      const queue = [...ids];
+      while (queue.length > 0) {
+        const current = queue.shift();
+        const children = parentMap[current] || [];
+        for (const child of children) {
+          if (!all.has(child)) {
+            all.add(child);
+            queue.push(child);
+          }
+        }
+      }
+      return Array.from(all);
+    }
+    const allDeleted = getAllDescendants(Array.from(deletedIds));
+    // Remove deleted entities from entityMap
+    allDeleted.forEach((id) => {
+      delete entityMap[id];
+    });
+    // Now, rebuild children arrays for remaining entities
+    Object.values(entityMap).forEach((entity) => {
+      entity.children = [];
+    });
+    relationships.forEach((rel) => {
+      if (entityMap[rel.parent_entity_id] && entityMap[rel.child_entity_id]) {
+        entityMap[rel.parent_entity_id].children.push(
+          entityMap[rel.child_entity_id]
+        );
       }
     });
-    const topLevel = entities
-      .filter(
-        (e) =>
-          e.is_top_level_entity ||
-          !relationships.some((rel) => rel.child_entity_id === e.entity_id)
-      )
-      .map((e) => entityMap[e.entity_name]);
+    // Find top-level entities (not deleted, not child of any parent, or is_top_level_entity)
+    const topLevel = Object.values(entityMap).filter(
+      (e) =>
+        e.data.is_top_level_entity ||
+        !relationships.some((rel) => rel.child_entity_id === e.id)
+    );
 
     res.json(topLevel);
   } catch (err) {
