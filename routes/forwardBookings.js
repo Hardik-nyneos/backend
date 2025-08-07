@@ -29,4 +29,5 @@ router.post("/:system_transaction_id/update",forwardController.updateForwardBook
 // Bulk approve/reject forward bookings
 router.post('/forward-bookings/bulk-update-processing-status', forwardController.bulkUpdateForwardBookingProcessingStatus);
 
+router.post("/bulk-delete", forwardController.bulkDeleteForwardBookings);
 module.exports = router;
