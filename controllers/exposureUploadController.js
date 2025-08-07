@@ -1,3 +1,71 @@
+const editExposureHeadersLineItemsJoined = async (req, res) => {
+  const { id } = req.params; // id is a line item id (primary key of exposure_line_items)
+  const fields = req.body;
+  try {
+    // Get the joined row to determine header and line item ids
+    const joinResult = await pool.query(
+      `SELECT h.*, l.* FROM exposure_headers h JOIN exposure_line_items l ON h.exposure_header_id = l.exposure_header_id WHERE l.exposure_header_id = $1`,
+      [id]
+    );
+    if (joinResult.rows.length === 0) {
+      return res.status(404).json({ success: false, message: "Row not found" });
+    }
+    const row = joinResult.rows[0];
+    const exposure_header_id = row.exposure_header_id;
+    // Get columns for each table
+    const headerColsRes = await pool.query(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'exposure_headers'`
+    );
+    const lineColsRes = await pool.query(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'exposure_line_items'`
+    );
+    const headerCols = headerColsRes.rows.map((r) => r.column_name);
+    const lineCols = lineColsRes.rows.map((r) => r.column_name);
+    // Split fields
+    const headerFields = {};
+    const lineFields = {};
+    for (const key of Object.keys(fields)) {
+      if (headerCols.includes(key)) headerFields[key] = fields[key];
+      if (lineCols.includes(key)) lineFields[key] = fields[key];
+    }
+    // Update header if needed
+    if (Object.keys(headerFields).length > 0) {
+      const keys = Object.keys(headerFields);
+      const setClause =
+        keys.map((k, i) => `${k} = $${i + 1}`).join(", ") +
+        ", approval_status = 'Pending'";
+      const values = [...keys.map((k) => headerFields[k]), exposure_header_id];
+      await pool.query(
+        `UPDATE exposure_headers SET ${setClause} WHERE exposure_header_id = $${
+          keys.length + 1
+        }`,
+        values
+      );
+    }
+    // Update line item if needed
+    if (Object.keys(lineFields).length > 0) {
+      const keys = Object.keys(lineFields);
+      const setClause = keys.map((k, i) => `${k} = $${i + 1}`).join(", ");
+      const values = [...keys.map((k) => lineFields[k]), id];
+      await pool.query(
+        `UPDATE exposure_line_items SET ${setClause} WHERE exposure_header_id = $${
+          keys.length + 1
+        }`,
+        values
+      );
+    }
+    // Return the updated joined row
+    const updatedJoin = await pool.query(
+      `SELECT h.*, l.* FROM exposure_headers h JOIN exposure_line_items l ON h.exposure_header_id = l.exposure_header_id WHERE l.exposure_header_id = $1`,
+      [id]
+    );
+    res.json({ success: true, row: updatedJoin.rows[0] });
+  } catch (err) {
+    console.error("Error editing joined exposure headers/line items:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
 const hedgeLinksDetails = async (req, res) => {
   try {
     // 0. Get current user session and allowed buNames (same as expfwdLinkingBookings)
@@ -2197,6 +2265,7 @@ const getPendingApprovalHeadersLineItems = async (req, res) => {
 };
 
 module.exports = {
+  editExposureHeadersLineItemsJoined,
   hedgeLinksDetails,
   expfwdLinkingBookings,
   expfwdLinking,
