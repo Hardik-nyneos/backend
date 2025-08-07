@@ -24,6 +24,9 @@ router.post('/forward-confirmations/manual-entry', forwardController.addForwardC
 router.post('/forward-confirmations/upload-multi', forwardController.upload.array('files'), forwardController.uploadForwardConfirmationsMulti);
 // Change processing_status to Approved or Rejected for a forward booking
 router.post('/forward-bookings/update-processing-status', forwardController.updateForwardBookingProcessingStatus);
+// Update any fields of forward_bookings using system_transaction_id
+router.post("/:system_transaction_id/update",forwardController.updateForwardBookingFields);
 // Bulk approve/reject forward bookings
 router.post('/forward-bookings/bulk-update-processing-status', forwardController.bulkUpdateForwardBookingProcessingStatus);
+
 module.exports = router;
