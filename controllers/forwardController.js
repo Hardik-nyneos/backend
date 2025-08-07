@@ -1,3 +1,19 @@
+// Bulk set processing_status to 'Delete-approval' for given system_transaction_ids
+async function bulkDeleteForwardBookings(req, res) {
+  try {
+    const { system_transaction_ids } = req.body;
+    if (!Array.isArray(system_transaction_ids) || system_transaction_ids.length === 0) {
+      return res.status(400).json({ error: "system_transaction_ids (array) required" });
+    }
+    // Set processing_status to 'Delete-approval' for all provided IDs
+    const updateQuery = `UPDATE forward_bookings SET processing_status = 'Delete-approval' WHERE system_transaction_id = ANY($1) RETURNING *`;
+    const result = await pool.query(updateQuery, [system_transaction_ids]);
+    res.status(200).json({ success: true, updated: result.rows });
+  } catch (err) {
+    console.error("bulkDeleteForwardBookings error:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+}
 // GET /api/forward/linkedSummaryByCategory
 async function getLinkedSummaryByCategory(req, res) {
   try {
@@ -884,23 +900,69 @@ async function updateForwardBookingProcessingStatus(req, res) {
 }
 
 // Bulk approve/reject forward bookings
+// async function bulkUpdateForwardBookingProcessingStatus(req, res) {
+//   try {
+//     const { system_transaction_ids, processing_status } = req.body;
+//     if (!Array.isArray(system_transaction_ids) || system_transaction_ids.length === 0 || !['Approved', 'Rejected'].includes(processing_status)) {
+//       return res.status(400).json({ error: "system_transaction_ids (array) and valid processing_status (Approved/Rejected) required" });
+//     }
+//     let query, values;
+//     if (processing_status === 'Approved') {
+//       query = `UPDATE forward_bookings SET processing_status = $1, status = 'Confirmed' WHERE system_transaction_id = ANY($2) RETURNING *`;
+//       values = [processing_status, system_transaction_ids];
+//     } else {
+//       query = `UPDATE forward_bookings SET processing_status = $1 WHERE system_transaction_id = ANY($2) RETURNING *`;
+//       values = [processing_status, system_transaction_ids];
+//     }
+//     const result = await pool.query(query, values);
+//     if (result.rowCount > 0) {
+//       res.status(200).json({ success: true, updated: result.rows });
+//     } else {
+//       res.status(404).json({ success: false, error: "No matching forward bookings found" });
+//     }
+//   } catch (err) {
+//     console.error("bulkUpdateForwardBookingProcessingStatus error:", err);
+//     res.status(500).json({ success: false, error: err.message });
+//   }
+// }
 async function bulkUpdateForwardBookingProcessingStatus(req, res) {
   try {
     const { system_transaction_ids, processing_status } = req.body;
-    if (!Array.isArray(system_transaction_ids) || system_transaction_ids.length === 0 || !['Approved', 'Rejected'].includes(processing_status)) {
-      return res.status(400).json({ error: "system_transaction_ids (array) and valid processing_status (Approved/Rejected) required" });
+    if (!Array.isArray(system_transaction_ids) || system_transaction_ids.length === 0 || !["Approved", "Rejected"].includes(processing_status)) {
+      return res.status(400).json({
+        error: "system_transaction_ids (array) and valid processing_status (Approved/Rejected) required",
+      });
     }
-    let query, values;
-    if (processing_status === 'Approved') {
-      query = `UPDATE forward_bookings SET processing_status = $1, status = 'Confirmed' WHERE system_transaction_id = ANY($2) RETURNING *`;
-      values = [processing_status, system_transaction_ids];
-    } else {
-      query = `UPDATE forward_bookings SET processing_status = $1 WHERE system_transaction_id = ANY($2) RETURNING *`;
-      values = [processing_status, system_transaction_ids];
+    // Find which records will be deleted
+    const delRes = await pool.query(
+      `SELECT system_transaction_id FROM forward_bookings WHERE system_transaction_id = ANY($1) AND processing_status = 'Delete-approval'`,
+      [system_transaction_ids]
+    );
+    const deletedIds = delRes.rows.map(r => r.system_transaction_id);
+    // Delete them
+    if (deletedIds.length > 0) {
+      await pool.query(
+        `DELETE FROM forward_bookings WHERE system_transaction_id = ANY($1) AND processing_status = 'Delete-approval'`,
+        [deletedIds]
+      );
     }
-    const result = await pool.query(query, values);
-    if (result.rowCount > 0) {
-      res.status(200).json({ success: true, updated: result.rows });
+    // The rest are eligible for update
+    const updateIds = system_transaction_ids.filter(id => !deletedIds.includes(id));
+    let updatedRows = [];
+    if (updateIds.length > 0) {
+      let query, values;
+      if (processing_status === "Approved") {
+        query = `UPDATE forward_bookings SET processing_status = $1, status = 'Confirmed' WHERE system_transaction_id = ANY($2) RETURNING *`;
+        values = [processing_status, updateIds];
+      } else {
+        query = `UPDATE forward_bookings SET processing_status = $1 WHERE system_transaction_id = ANY($2) RETURNING *`;
+        values = [processing_status, updateIds];
+      }
+      const result = await pool.query(query, values);
+      updatedRows = result.rows;
+    }
+    if (updatedRows.length > 0 || deletedIds.length > 0) {
+      res.status(200).json({ success: true, updated: updatedRows, deleted: deletedIds });
     } else {
       res.status(404).json({ success: false, error: "No matching forward bookings found" });
     }
@@ -921,6 +983,7 @@ module.exports = {
   getEntityRelevantForwardBookings,
   updateForwardBookingProcessingStatus,
   bulkUpdateForwardBookingProcessingStatus,
+  bulkDeleteForwardBookings,
   updateForwardBookingFields,
 };
 
