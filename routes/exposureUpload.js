@@ -91,6 +91,11 @@ router.get(
   exposureUploadController.getExposureHeadersLineItems
 );
 
+router.post(
+  "/:id/edit",
+  exposureUploadController.editExposureHeadersLineItemsJoined
+);
+
 router.get(
   "/pending-headers-lineitems",
   exposureUploadController.getPendingApprovalHeadersLineItems
