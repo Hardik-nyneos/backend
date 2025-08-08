@@ -1,3 +1,161 @@
+async function getExposuresByBookingIds(req, res) {
+  try {
+    const { system_transaction_ids } = req.body;
+    if (!Array.isArray(system_transaction_ids) || system_transaction_ids.length === 0) {
+      return res.status(400).json({ error: "system_transaction_ids (array) required" });
+    }
+    // Get allowed business units for user
+    const globalSession = require("../globalSession");
+    const session = globalSession.UserSessions[0];
+    if (!session) {
+      return res.status(404).json({ error: "No active session found" });
+    }
+    const userId = session.userId;
+    let buNames = [];
+    try {
+      const userResult = await pool.query(
+        "SELECT business_unit_name FROM users WHERE id = $1",
+        [userId]
+      );
+      if (!userResult.rows.length) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      const userBu = userResult.rows[0].business_unit_name;
+      if (!userBu) {
+        return res.status(404).json({ error: "User has no business unit assigned" });
+      }
+      const entityResult = await pool.query(
+        "SELECT entity_id FROM masterentity WHERE entity_name = $1 AND (approval_status = 'Approved' OR approval_status = 'approved') AND (is_deleted = false OR is_deleted IS NULL)",
+        [userBu]
+      );
+      if (!entityResult.rows.length) {
+        return res.status(404).json({ error: "Business unit entity not found" });
+      }
+      const rootEntityId = entityResult.rows[0].entity_id;
+      const descendantsResult = await pool.query(
+        `WITH RECURSIVE descendants AS (
+          SELECT entity_id, entity_name FROM masterentity WHERE entity_id = $1
+          UNION ALL
+          SELECT me.entity_id, me.entity_name
+          FROM masterentity me
+          INNER JOIN entityRelationships er ON me.entity_id = er.child_entity_id
+          INNER JOIN descendants d ON er.parent_entity_id = d.entity_id
+          WHERE (me.approval_status = 'Approved' OR me.approval_status = 'approved') AND (me.is_deleted = false OR me.is_deleted IS NULL)
+        )
+        SELECT entity_name FROM descendants`,
+        [rootEntityId]
+      );
+      buNames = descendantsResult.rows.map((r) => r.entity_name);
+      if (!buNames.length) {
+        return res.status(404).json({ error: "No accessible business units found" });
+      }
+    } catch (err) {
+      console.error("Error fetching allowed business units:", err);
+      return res.status(500).json({ error: "Failed to fetch allowed business units" });
+    }
+    // Find all exposure_header_ids linked to these booking_ids, filter by allowed entities
+    const query = `
+      SELECT
+        ehl.exposure_header_id,
+        eh.document_id,
+        eh.exposure_type,
+        eh.currency,
+        eh.total_open_amount,
+        eh.total_original_amount,
+        eh.document_date
+      FROM exposure_hedge_links ehl
+      JOIN exposure_headers eh ON ehl.exposure_header_id = eh.exposure_header_id
+      WHERE ehl.booking_id = ANY($1)
+        AND (ehl.is_active = true OR ehl.is_active IS NULL)
+        AND eh.entity = ANY($2)
+    `;
+    const result = await pool.query(query, [system_transaction_ids, buNames]);
+    res.status(200).json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error("getExposuresByBookingIds error:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+}
+// GET API: List forward bookings (selected fields, buNames check)
+async function getForwardBookingList(req, res) {
+  try {
+    // Get allowed business units for user
+    const globalSession = require("../globalSession");
+    const session = globalSession.UserSessions[0];
+    if (!session) {
+      return res.status(404).json({ error: "No active session found" });
+    }
+    const userId = session.userId;
+    let buNames = [];
+    try {
+      const userResult = await pool.query(
+        "SELECT business_unit_name FROM users WHERE id = $1",
+        [userId]
+      );
+      if (!userResult.rows.length) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      const userBu = userResult.rows[0].business_unit_name;
+      if (!userBu) {
+        return res
+          .status(404)
+          .json({ error: "User has no business unit assigned" });
+      }
+      const entityResult = await pool.query(
+        "SELECT entity_id FROM masterentity WHERE entity_name = $1 AND (approval_status = 'Approved' OR approval_status = 'approved') AND (is_deleted = false OR is_deleted IS NULL)",
+        [userBu]
+      );
+      if (!entityResult.rows.length) {
+        return res
+          .status(404)
+          .json({ error: "Business unit entity not found" });
+      }
+      const rootEntityId = entityResult.rows[0].entity_id;
+      const descendantsResult = await pool.query(
+        `WITH RECURSIVE descendants AS (
+          SELECT entity_id, entity_name FROM masterentity WHERE entity_id = $1
+          UNION ALL
+          SELECT me.entity_id, me.entity_name
+          FROM masterentity me
+          INNER JOIN entityRelationships er ON me.entity_id = er.child_entity_id
+          INNER JOIN descendants d ON er.parent_entity_id = d.entity_id
+          WHERE (me.approval_status = 'Approved' OR me.approval_status = 'approved') AND (me.is_deleted = false OR me.is_deleted IS NULL)
+        )
+        SELECT entity_name FROM descendants`,
+        [rootEntityId]
+      );
+      buNames = descendantsResult.rows.map((r) => r.entity_name);
+      if (!buNames.length) {
+        return res
+          .status(404)
+          .json({ error: "No accessible business units found" });
+      }
+    } catch (err) {
+      console.error("Error fetching allowed business units:", err);
+      return res
+        .status(500)
+        .json({ error: "Failed to fetch allowed business units" });
+    }
+    // Query forward_bookings for allowed BUs, select only required fields
+    const query = `
+      SELECT 
+        system_transaction_id,
+        internal_reference_id,
+        currency_pair,
+        booking_amount,
+        spot_rate,
+        maturity_date
+      FROM forward_bookings
+      WHERE entity_level_0 = ANY($1)
+    `;
+    const result = await pool.query(query, [buNames]);
+    res.status(200).json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error("getForwardBookingList error:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+}
+
 // API: Get all forward_bookings for allowed entities and currency (no exposure linkage)
 async function getForwardBookingsByEntityAndCurrency(req, res) {
   try {
@@ -199,5 +357,9 @@ async function filterForwardBookingsForSettlement(req, res) {
   }
 }
 
-module.exports = { filterForwardBookingsForSettlement };
-module.exports.getForwardBookingsByEntityAndCurrency = getForwardBookingsByEntityAndCurrency;
+module.exports = {
+  filterForwardBookingsForSettlement,
+  getForwardBookingsByEntityAndCurrency,
+  getForwardBookingList,
+  getExposuresByBookingIds,
+};
