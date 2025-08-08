@@ -382,7 +382,8 @@ exports.findParentAtLevel = async (req, res) => {
     }
     const parentLevel = numericLevel - 1;
     const result = await pool.query(
-      "SELECT entity_name FROM masterEntity WHERE TRIM(BOTH ' ' FROM level) = $1 OR TRIM(BOTH ' ' FROM level) = $2",
+      // "SELECT entity_name FROM masterEntity WHERE TRIM(BOTH ' ' FROM level) = $1 OR TRIM(BOTH ' ' FROM level) = $2",
+      "SELECT entity_name FROM masterEntity WHERE (TRIM(BOTH ' ' FROM level) = $1 OR TRIM(BOTH ' ' FROM level) = $2) AND (is_deleted = false OR is_deleted IS NULL)",
       [parentLevel.toString(), `Level ${parentLevel}`]
     );
     res.json(result.rows);
