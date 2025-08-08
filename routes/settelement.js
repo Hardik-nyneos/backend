@@ -7,4 +7,9 @@ const settelementController = require('../controllers/settelementController');
 // POST /settlement/filter-forward-bookings
 router.post('/filter-forward-bookings', settelementController.filterForwardBookingsForSettlement);
 router.post('/forwards-by-entity-currency', settelementController.getForwardBookingsByEntityAndCurrency);
+router.get("/bookingList", settelementController.getForwardBookingList);
+router.post(
+  "/exposuresByBookingIds",
+  settelementController.getExposuresByBookingIds
+);
 module.exports = router;
