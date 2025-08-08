@@ -1,8 +1,56 @@
 // GET /api/forwardDash/bu-maturity-currency-summary
 exports.getBuMaturityCurrencySummaryJoined = async (req, res) => {
   try {
+    // --- Get allowed business units for user (descendants logic) ---
+    const globalSession = require("../globalSession");
+    const session = globalSession.UserSessions[0];
+    if (!session) {
+      return res.status(404).json({ error: "No active session found" });
+    }
+    const userId = session.userId;
+    // Get user's business unit name
+    const userResult = await pool.query(
+      "SELECT business_unit_name FROM users WHERE id = $1",
+      [userId]
+    );
+    if (!userResult.rows.length) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const userBu = userResult.rows[0].business_unit_name;
+    if (!userBu) {
+      return res.status(404).json({ error: "User has no business unit assigned" });
+    }
+    // Find all descendant business units using recursive CTE
+    const entityResult = await pool.query(
+      "SELECT entity_id FROM masterEntity WHERE entity_name = $1 AND (approval_status = 'Approved' OR approval_status = 'approved') AND (is_deleted = false OR is_deleted IS NULL)",
+      [userBu]
+    );
+    if (!entityResult.rows.length) {
+      return res.status(404).json({ error: "Business unit entity not found" });
+    }
+    const rootEntityId = entityResult.rows[0].entity_id;
+    const descendantsResult = await pool.query(
+      `WITH RECURSIVE descendants AS (
+        SELECT entity_id, entity_name FROM masterEntity WHERE entity_id = $1
+        UNION ALL
+        SELECT me.entity_id, me.entity_name
+        FROM masterEntity me
+        INNER JOIN entityRelationships er ON me.entity_id = er.child_entity_id
+        INNER JOIN descendants d ON er.parent_entity_id = d.entity_id
+        WHERE (me.approval_status = 'Approved' OR me.approval_status = 'approved') AND (me.is_deleted = false OR me.is_deleted IS NULL)
+      )
+      SELECT entity_name FROM descendants`,
+      [rootEntityId]
+    );
+    const buNames = descendantsResult.rows.map((r) => r.entity_name);
+    if (!buNames.length) {
+      return res.status(404).json({ error: "No accessible business units found" });
+    }
+
+    // Only select forward_bookings for allowed entities
     const result = await pool.query(
-      "SELECT entity_level_0, delivery_period, quote_currency, order_type, booking_amount FROM forward_bookings"
+      "SELECT entity_level_0, delivery_period, quote_currency, order_type, booking_amount FROM forward_bookings WHERE entity_level_0 = ANY($1)",
+      [buNames]
     );
     const bucketLabels = {
       month_1: "1 Month",
