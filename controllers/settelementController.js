@@ -144,7 +144,8 @@ async function getForwardBookingList(req, res) {
         currency_pair,
         booking_amount,
         spot_rate,
-        maturity_date
+        maturity_date,
+        counterparty
       FROM forward_bookings
       WHERE entity_level_0 = ANY($1)
     `;
