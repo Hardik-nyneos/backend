@@ -138,18 +138,19 @@ async function getForwardBookingList(req, res) {
     }
     // Query forward_bookings for allowed BUs, select only required fields
     const query = `
-      SELECT 
-        system_transaction_id,
-        internal_reference_id,
-        currency_pair,
-        booking_amount,
-        spot_rate,
-        maturity_date,
-        order_type,
-        counterparty
-      FROM forward_bookings
-      WHERE entity_level_0 = ANY($1)
-    `;
+  SELECT 
+    system_transaction_id,
+    internal_reference_id,
+    currency_pair,
+    booking_amount,
+    spot_rate,
+    maturity_date,
+    order_type,
+    counterparty
+  FROM forward_bookings
+  WHERE entity_level_0 = ANY($1)
+    AND status NOT IN ('Cancelled', 'Pending Confirmation')
+`;
     const result = await pool.query(query, [buNames]);
     res.status(200).json({ success: true, data: result.rows });
   } catch (err) {
