@@ -1,3 +1,60 @@
+// Helper to deactivate exposure_hedge_links for booking_ids
+async function deactivateExposureHedgeLinks(booking_ids, pool) {
+  if (!Array.isArray(booking_ids) || booking_ids.length === 0) return;
+  await pool.query(
+    `UPDATE exposure_hedge_links SET is_active = false WHERE booking_id = ANY($1)`,
+    [booking_ids]
+  );
+}
+// POST /api/settlement/forward-cancellations
+async function createForwardCancellations(req, res) {
+  try {
+    const {
+      booking_ids, // array of UUIDs
+      amount_cancelled,
+      cancellation_date,
+      cancellation_rate,
+      realized_gain_loss,
+      cancellation_reason
+    } = req.body;
+    if (!Array.isArray(booking_ids) || booking_ids.length === 0 || !amount_cancelled || !cancellation_date || !cancellation_rate) {
+      return res.status(400).json({ error: "booking_ids (array), amount_cancelled, cancellation_date, and cancellation_rate are required" });
+    }
+
+    // Insert a row for each booking_id
+    const insertQuery = `
+      INSERT INTO forward_cancellations (
+        booking_id, amount_cancelled, cancellation_date, cancellation_rate, realized_gain_loss, cancellation_reason
+      ) VALUES 
+        ${booking_ids.map((_, i) => `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6})`).join(",\n        ")}
+      RETURNING *
+    `;
+    const insertValues = booking_ids.flatMap(bid => [
+      bid,
+      amount_cancelled,
+      cancellation_date,
+      cancellation_rate,
+      realized_gain_loss,
+      cancellation_reason
+    ]);
+    const insertResult = await pool.query(insertQuery, insertValues);
+
+    // Update status in forward_bookings for all booking_ids
+    await pool.query(
+      `UPDATE forward_bookings SET status = 'Cancelled' WHERE system_transaction_id = ANY($1)`,
+      [booking_ids]
+    );
+
+    // Set is_active = false in exposure_hedge_links for all booking_ids
+    await deactivateExposureHedgeLinks(booking_ids, pool);
+
+    res.status(201).json({ success: true, inserted: insertResult.rows.length, cancellations: insertResult.rows });
+  } catch (err) {
+    console.error("createForwardCancellations error:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+}
+
 async function getExposuresByBookingIds(req, res) {
   try {
     const { system_transaction_ids } = req.body;
