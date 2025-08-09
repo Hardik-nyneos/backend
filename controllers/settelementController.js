@@ -422,4 +422,5 @@ module.exports = {
   getForwardBookingsByEntityAndCurrency,
   getForwardBookingList,
   getExposuresByBookingIds,
+  createForwardCancellations
 };
