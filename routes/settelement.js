@@ -12,4 +12,6 @@ router.post(
   "/exposuresByBookingIds",
   settelementController.getExposuresByBookingIds
 );
+router.post('/create-cancellations', settelementController.createForwardCancellations);
+
 module.exports = router;
