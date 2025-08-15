@@ -1734,6 +1734,294 @@ function parseUploadFile(filePath, mimetype) {
   });
 }
 // New batch upload endpoint for form-data file upload
+// const batchUploadStagingData = async (req, res) => {
+//   try {
+//     const session = globalSession.UserSessions[0];
+//     if (!session)
+//       return res.status(404).json({ error: "No active session found" });
+
+//     // req.files: { input_letters_of_credit: [file, ...], ... }
+//     const files = [];
+//     if (req.files && req.files.input_letters_of_credit) {
+//       for (const file of req.files.input_letters_of_credit) {
+//         files.push({
+//           dataType: "LC",
+//           file,
+//           tableName: "input_letters_of_credit",
+//           filename: file.originalname,
+//         });
+//       }
+//     }
+//     if (req.files && req.files.input_purchase_orders) {
+//       for (const file of req.files.input_purchase_orders) {
+//         files.push({
+//           dataType: "PO",
+//           file,
+//           tableName: "input_purchase_orders",
+//           filename: file.originalname,
+//         });
+//       }
+//     }
+//     if (req.files && req.files.input_sales_orders) {
+//       for (const file of req.files.input_sales_orders) {
+//         files.push({
+//           dataType: "SO",
+//           file,
+//           tableName: "input_sales_orders",
+//           filename: file.originalname,
+//         });
+//       }
+//     }
+//     if (files.length === 0) {
+//       return res.status(400).json({ error: "No valid files found in request" });
+//     }
+
+//     // --- Business Unit Compliance Check (shared for all files) ---
+//     const userId = session.userId;
+//     let buNames = [];
+//     try {
+//       const userResult = await pool.query(
+//         "SELECT business_unit_name FROM users WHERE id = $1",
+//         [userId]
+//       );
+//       if (!userResult.rows.length) {
+//         return res.status(404).json({ error: "User not found" });
+//       }
+//       const userBu = userResult.rows[0].business_unit_name;
+//       if (!userBu) {
+//         return res
+//           .status(404)
+//           .json({ error: "User has no business unit assigned" });
+//       }
+//       const entityResult = await pool.query(
+//         "SELECT entity_id FROM masterEntity WHERE entity_name = $1 AND (approval_status = 'Approved' OR approval_status = 'approved') AND (is_deleted = false OR is_deleted IS NULL)",
+//         [userBu]
+//       );
+//       if (!entityResult.rows.length) {
+//         return res
+//           .status(404)
+//           .json({ error: "Business unit entity not found" });
+//       }
+//       const rootEntityId = entityResult.rows[0].entity_id;
+//       const descendantsResult = await pool.query(
+//         `
+//         WITH RECURSIVE descendants AS (
+//           SELECT entity_id, entity_name FROM masterEntity WHERE entity_id = $1
+//           UNION ALL
+//           SELECT me.entity_id, me.entity_name
+//           FROM masterEntity me
+//           INNER JOIN entityRelationships er ON me.entity_id = er.child_entity_id
+//           INNER JOIN descendants d ON er.parent_entity_id = d.entity_id
+//           WHERE (me.approval_status = 'Approved' OR me.approval_status = 'approved') AND (me.is_deleted = false OR me.is_deleted IS NULL)
+//         )
+//         SELECT entity_name FROM descendants
+//       `,
+//         [rootEntityId]
+//       );
+//       buNames = descendantsResult.rows.map((r) => r.entity_name);
+//       if (!buNames.length) {
+//         return res
+//           .status(404)
+//           .json({ error: "No accessible business units found" });
+//       }
+//     } catch (err) {
+//       console.error("Error fetching allowed business units:", err);
+//       return res
+//         .status(500)
+//         .json({ error: "Failed to fetch allowed business units" });
+//     }
+
+//     // --- Process each file independently ---
+//     const results = [];
+//     for (const fileObj of files) {
+//       const { dataType, file, tableName, filename } = fileObj;
+//       let dataArr = [];
+//       try {
+//         dataArr = await parseUploadFile(file.path, file.mimetype);
+//       } catch (err) {
+//         results.push({
+//           filename,
+//           error: `Failed to parse file: ${err.message}`,
+//         });
+//         fs.unlinkSync(file.path);
+//         continue;
+//       }
+//       if (!Array.isArray(dataArr) || dataArr.length === 0) {
+//         results.push({ filename, error: "No data to upload" });
+//         fs.unlinkSync(file.path);
+//         continue;
+//       }
+//       // Generate a new upload_batch_id for this file
+//       const uploadBatchId = uuidv4();
+//       // Check all rows' business unit using the correct column for each type
+//       let buCol = null;
+//       if (dataType === "LC") buCol = "applicant_name";
+//       else if (dataType === "PO" || dataType === "SO") buCol = "entity";
+//       const invalidRows = dataArr
+//         .filter((row) => !buNames.includes(row[buCol]))
+//         .map(
+//           (row) =>
+//             row["reference_no"] ||
+//             row["document_no"] ||
+//             row["system_lc_number"] ||
+//             "(no ref)"
+//         );
+//       if (invalidRows.length > 0) {
+//         results.push({
+//           filename,
+//           error: "Some rows have business_unit not allowed for this user.",
+//           invalidReferenceNos: invalidRows,
+//         });
+//         fs.unlinkSync(file.path);
+//         continue; // skip this file
+//       }
+//       // Try to insert all rows, if any error, skip the file
+//       const now = new Date();
+//       let insertedRows = 0;
+//       let fileError = null;
+//       try {
+//         for (let i = 0; i < dataArr.length; i++) {
+//           const row = dataArr[i];
+//           row.upload_batch_id = uploadBatchId;
+//           row.row_number = i + 1;
+//           // Convert DD-MM-YYYY to YYYY-MM-DD for all date fields
+//           for (const key of Object.keys(row)) {
+//             if (/date/i.test(key) && typeof row[key] === "string") {
+//               // Match DD-MM-YYYY
+//               const m = row[key].match(/^(\d{2})-(\d{2})-(\d{4})$/);
+//               if (m) {
+//                 row[key] = `${m[3]}-${m[2]}-${m[1]}`;
+//               }
+//             }
+//           }
+//           // row.uploaded_by = session.userId;
+//           // row.upload_date = now;
+//           const keys = Object.keys(row);
+//           const values = keys.map((k) => row[k]);
+//           const placeholders = keys.map((_, idx) => `$${idx + 1}`).join(", ");
+//           const query = `INSERT INTO ${tableName} (${keys.join(
+//             ", "
+//           )}) VALUES (${placeholders})`;
+//           await pool.query(query, values);
+//           insertedRows++;
+//         }
+//       } catch (err) {
+//         fileError = err.message || "Failed to insert data";
+//         // Rollback: delete all rows for this batch
+//         await pool.query(
+//           `DELETE FROM ${tableName} WHERE upload_batch_id = $1`,
+//           [uploadBatchId]
+//         );
+//         results.push({ filename, error: fileError });
+//         fs.unlinkSync(file.path);
+//         continue;
+//       }
+//       // --- Absorb batch into exposure_headers and exposure_line_items ---
+//       try {
+//         const { rows: mappings } = await pool.query(
+//           `SELECT * FROM upload_mappings WHERE exposure_type = $1 ORDER BY target_table_name, target_field_name`,
+//           [dataType]
+//         );
+//         const { rows: stagedRows } = await pool.query(
+//           `SELECT * FROM ${tableName} WHERE upload_batch_id = $1`,
+//           [uploadBatchId]
+//         );
+//         for (const staged of stagedRows) {
+//           // --- Build exposure_header ---
+//           const header = {};
+//           const headerDetails = {};
+//           for (const m of mappings.filter(
+//             (m) => m.target_table_name === "exposure_headers"
+//           )) {
+//             let val = null;
+//             if (m.source_column_name === dataType) val = dataType;
+//             else if (m.source_column_name === "Open") val = "Open";
+//             else if (m.source_column_name === "true") val = true;
+//             else if (m.source_column_name === tableName) val = staged;
+//             else val = staged[m.source_column_name];
+//             if (m.target_field_name === "additional_header_details")
+//               headerDetails[m.source_column_name] = val;
+//             else header[m.target_field_name] = val;
+//           }
+//           header["additional_header_details"] = headerDetails;
+//           // --- Insert exposure_header ---
+//           const headerFields = Object.keys(header);
+//           const headerVals = headerFields.map((k) => header[k]);
+//           const headerPlaceholders = headerFields
+//             .map((_, idx) => `$${idx + 1}`)
+//             .join(", ");
+//           const headerInsert = `INSERT INTO exposure_headers (${headerFields.join(
+//             ", "
+//           )}) VALUES (${headerPlaceholders}) RETURNING exposure_header_id, document_id, exposure_type, total_original_amount`;
+//           const { rows: headerRes } = await pool.query(
+//             headerInsert,
+//             headerVals
+//           );
+//           const exposureHeaderId = headerRes[0].exposure_header_id;
+//           // --- Build exposure_line_item(s) ---
+//           const line = {};
+//           const lineDetails = {};
+//           for (const m of mappings.filter(
+//             (m) => m.target_table_name === "exposure_line_items"
+//           )) {
+//             let val = null;
+//             if (m.source_column_name === dataType) val = dataType;
+//             else if (m.source_column_name === "1") val = 1;
+//             else if (m.source_column_name === tableName) val = staged;
+//             else val = staged[m.source_column_name];
+//             if (m.target_field_name === "additional_line_details")
+//               lineDetails[m.source_column_name] = val;
+//             else line[m.target_field_name] = val;
+//           }
+//           line["additional_line_details"] = lineDetails;
+//           line["exposure_header_id"] = exposureHeaderId;
+//           // --- Insert exposure_line_item ---
+//           // Remove linked_exposure_header_id if present
+//           if ("linked_exposure_header_id" in line) {
+//             delete line["linked_exposure_header_id"];
+//           }
+//           const lineFields = Object.keys(line);
+//           const lineVals = lineFields.map((k) => line[k]);
+//           const linePlaceholders = lineFields
+//             .map((_, idx) => `$${idx + 1}`)
+//             .join(", ");
+//           const lineInsert = `INSERT INTO exposure_line_items (${lineFields.join(
+//             ", "
+//           )}) VALUES (${linePlaceholders})`;
+//           await pool.query(lineInsert, lineVals);
+//         }
+//         results.push({
+//           success: true,
+//           filename,
+//           message: `Batch uploaded and absorbed to exposures`,
+//           uploadBatchId,
+//           insertedRows: stagedRows.length,
+//         });
+//       } catch (err) {
+//         // Rollback: delete all rows for this batch
+//         await pool.query(
+//           `DELETE FROM ${tableName} WHERE upload_batch_id = $1`,
+//           [uploadBatchId]
+//         );
+//         results.push({
+//           success: false,
+//           filename,
+//           error: err.message || "Failed to absorb batch data",
+//         });
+//       }
+//       // Always delete the uploaded file
+//       fs.unlinkSync(file.path);
+//     }
+//     // Return results for all files
+//     res.status(200).json({ results });
+//   } catch (err) {
+//     console.error("batchUploadStagingData error:", err);
+//     res
+//       .status(500)
+//       .json({ success: false, error: "Failed to upload batch data" });
+//   }
+// };
+
 const batchUploadStagingData = async (req, res) => {
   try {
     const session = globalSession.UserSessions[0];
@@ -1768,6 +2056,28 @@ const batchUploadStagingData = async (req, res) => {
           dataType: "SO",
           file,
           tableName: "input_sales_orders",
+          filename: file.originalname,
+        });
+      }
+    }
+    // Add support for input_creditors
+    if (req.files && req.files.input_creditors) {
+      for (const file of req.files.input_creditors) {
+        files.push({
+          dataType: "creditors",
+          file,
+          tableName: "input_creditors",
+          filename: file.originalname,
+        });
+      }
+    }
+    // Add support for input_debitors
+    if (req.files && req.files.input_debitors) {
+      for (const file of req.files.input_debitors) {
+        files.push({
+          dataType: "debitors",
+          file,
+          tableName: "input_debitors",
           filename: file.originalname,
         });
       }
@@ -1857,6 +2167,23 @@ const batchUploadStagingData = async (req, res) => {
       let buCol = null;
       if (dataType === "LC") buCol = "applicant_name";
       else if (dataType === "PO" || dataType === "SO") buCol = "entity";
+      else if (dataType === "creditors" || dataType === "debitors")
+        buCol = "company";
+      // Constraint: if buCol is 'company', require 'bank_reference' to be present
+      // if (buCol === "company") {
+      //   const missingBankRefRows = dataArr
+      //     .filter((row) => !row["bank_reference"] || row["bank_reference"].trim() === "")
+      //     .map((row) => row["reference_no"] || row["document_no"] || row["system_lc_number"] || "(no ref)");
+      //   if (missingBankRefRows.length > 0) {
+      //     results.push({
+      //       filename,
+      //       error: "Some rows are missing bank_reference.",
+      //       invalidReferenceNos: missingBankRefRows,
+      //     });
+      //     fs.unlinkSync(file.path);
+      //     continue;
+      //   }
+      // }
       const invalidRows = dataArr
         .filter((row) => !buNames.includes(row[buCol]))
         .map(
@@ -1864,6 +2191,7 @@ const batchUploadStagingData = async (req, res) => {
             row["reference_no"] ||
             row["document_no"] ||
             row["system_lc_number"] ||
+            row["bank_reference"] ||
             "(no ref)"
         );
       if (invalidRows.length > 0) {
@@ -1894,6 +2222,38 @@ const batchUploadStagingData = async (req, res) => {
               }
             }
           }
+          // for (const key of Object.keys(row)) {
+          //   if (/date|posting_date|net_due_date/i.test(key) && row[key]) {
+          //     if (typeof row[key] === "string") {
+          //       // Match DD-MM-YYYY
+          //       const m = row[key].match(/^([0-9]{2})-([0-9]{2})-([0-9]{4})$/);
+          //       if (m) {
+          //         row[key] = `${m[3]}-${m[2]}-${m[1]}`;
+          //         continue;
+          //       }
+          //       // Match YYYY-MM-DD
+          //       if (/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(row[key])) {
+          //         continue;
+          //       }
+          //       // Match Excel serial date (5 digits)
+          //       if (/^\d{5}$/.test(row[key])) {
+          //         const serial = parseInt(row[key], 10);
+          //         const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+          //         const jsDate = new Date(
+          //           excelEpoch.getTime() + serial * 86400000
+          //         );
+          //         row[key] = jsDate.toISOString().slice(0, 10);
+          //         continue;
+          //       }
+          //       // Not valid, throw error
+          //       throw new Error(
+          //         `Invalid date format in column '${key}' for row ${i + 1}: '${
+          //           row[key]
+          //         }'`
+          //       );
+          //     }
+          //   }
+          // }
           // row.uploaded_by = session.userId;
           // row.upload_date = now;
           const keys = Object.keys(row);
