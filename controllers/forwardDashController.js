@@ -283,7 +283,7 @@ exports.getBankTradesData = async (req, res) => {
     );
     const bankMap = {};
     for (const row of result.rows) {
-      const bank = row.counterparty_dealer || "Unknown Bank";
+      const bank = row.counterparty || "Unknown Bank";
       const trade = `${row.order_type ? row.order_type.trim() : ""} ${
         row.quote_currency ? row.quote_currency.trim() : ""
       }`
