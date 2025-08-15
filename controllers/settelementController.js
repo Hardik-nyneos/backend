@@ -200,7 +200,7 @@ async function getForwardBookingList(req, res) {
     internal_reference_id,
     currency_pair,
     booking_amount,
-    spot_rate,
+    total_rate AS spot_rate,
     maturity_date,
     order_type,
     entity_level_0,
