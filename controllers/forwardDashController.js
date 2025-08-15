@@ -279,7 +279,7 @@ exports.getBankTradesData = async (req, res) => {
       INR: 0.0117,
     };
     const result = await pool.query(
-      "SELECT counterparty_dealer, order_type, quote_currency, booking_amount FROM forward_bookings"
+      "SELECT counterparty, order_type, quote_currency, booking_amount FROM forward_bookings"
     );
     const bankMap = {};
     for (const row of result.rows) {
