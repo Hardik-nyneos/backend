@@ -376,6 +376,7 @@ const getTopCurrenciesFromHeaders = async (req, res) => {
     CAD: 0.75,
     CHF: 1.1,
     CNY: 0.14,
+    RMB:0.14,
     EUR: 1.09,
     GBP: 1.28,
     JPY: 0.0067,
@@ -457,9 +458,9 @@ const getBuMaturityCurrencySummaryJoined = async (req, res) => {
         if (!summary[bucket][bu]) summary[bucket][bu] = {};
         if (!summary[bucket][bu][currency])
           summary[bucket][bu][currency] = { payables: 0, receivables: 0 };
-        if (exposureType === "PO") {
+        if (exposureType === "PO"||exposureType==="creditors") {
           summary[bucket][bu][currency].payables += amount;
-        } else if (exposureType === "SO" || exposureType === "LC") {
+        } else if (exposureType === "SO" || exposureType === "LC"||exposureType==="debitors") {
           summary[bucket][bu][currency].receivables += amount;
         }
       }
@@ -1206,6 +1207,7 @@ const getTotalOpenAmountUsdSumFromHeaders = async (req, res) => {
     CAD: 0.75,
     CHF: 1.1,
     CNY: 0.14,
+    RMB:0.14,
     EUR: 1.09,
     GBP: 1.28,
     JPY: 0.0067,
@@ -1281,6 +1283,7 @@ const getPayablesByCurrencyFromHeaders = async (req, res) => {
     CAD: 0.75,
     CHF: 1.1,
     CNY: 0.14,
+    RMB:0.14,
     EUR: 1.09,
     GBP: 1.28,
     JPY: 0.0067,
@@ -1289,7 +1292,7 @@ const getPayablesByCurrencyFromHeaders = async (req, res) => {
   };
   try {
     const result = await pool.query(
-      "SELECT total_open_amount, currency FROM exposure_headers WHERE exposure_type = 'PO'"
+      "SELECT total_open_amount, currency FROM exposure_headers WHERE exposure_type = 'PO' OR exposure_type = 'creditors' "
     );
     const currencyTotals = {};
     for (const row of result.rows) {
@@ -1359,6 +1362,7 @@ const getReceivablesByCurrencyFromHeaders = async (req, res) => {
     CAD: 0.75,
     CHF: 1.1,
     CNY: 0.14,
+    RMB: 0.14,
     EUR: 1.09,
     GBP: 1.28,
     JPY: 0.0067,
@@ -1367,7 +1371,7 @@ const getReceivablesByCurrencyFromHeaders = async (req, res) => {
   };
   try {
     const result = await pool.query(
-      "SELECT total_open_amount, currency, exposure_type FROM exposure_headers WHERE exposure_type = 'SO' OR exposure_type = 'LC'"
+      "SELECT total_open_amount, currency, exposure_type FROM exposure_headers WHERE exposure_type = 'SO' OR exposure_type = 'LC' OR exposure_type = 'debitors'"
     );
     const currencyTotals = {};
     for (const row of result.rows) {
@@ -1438,6 +1442,7 @@ const getAmountByCurrencyFromHeaders = async (req, res) => {
     CAD: 0.75,
     CHF: 1.1,
     CNY: 0.14,
+    RMB: 0.14,
     EUR: 1.09,
     GBP: 1.28,
     JPY: 0.0067,
@@ -1530,6 +1535,7 @@ const getBusinessUnitCurrencySummaryFromHeaders = async (req, res) => {
     CAD: 0.75,
     CHF: 1.1,
     CNY: 0.14,
+    RMB: 0.14,
     EUR: 1.09,
     GBP: 1.28,
     JPY: 0.0067,
@@ -1632,6 +1638,7 @@ const getMaturityExpirySummaryFromHeaders = async (req, res) => {
     CAD: 0.75,
     CHF: 1.1,
     CNY: 0.14,
+    RMB:0.14,
     EUR: 1.09,
     GBP: 1.28,
     JPY: 0.0067,
