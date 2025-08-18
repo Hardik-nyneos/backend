@@ -2231,13 +2231,31 @@ const batchUploadStagingData = async (req, res) => {
           row.row_number = i + 1;
           // Convert DD-MM-YYYY to YYYY-MM-DD for all date fields
           for (const key of Object.keys(row)) {
-            if (/date/i.test(key) && typeof row[key] === "string") {
-              // Match DD-MM-YYYY
-              const m = row[key].match(/^(\d{2})-(\d{2})-(\d{4})$/);
-              if (m) {
-                row[key] = `${m[3]}-${m[2]}-${m[1]}`;
+            if (/date|timestamp/i.test(key) && row[key]) {
+              if (typeof row[key] === "string") {
+                // Match DD-MM-YYYY
+                const m = row[key].match(/^(\d{2})-(\d{2})-(\d{4})$/);
+                if (m) {
+                  row[key] = `${m[3]}-${m[2]}-${m[1]}`;
+                } else if (/^\d{5}$/.test(row[key])) {
+                  // Excel serial date (5 digits)
+                  const serial = parseInt(row[key], 10);
+                  const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+                  const jsDate = new Date(excelEpoch.getTime() + serial * 86400000);
+                  row[key] = jsDate.toISOString().slice(0, 10);
+                }
+              } else if (typeof row[key] === "number" && row[key] > 30000 && row[key] < 60000) {
+                // Excel serial date as number
+                const serial = row[key];
+                const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+                const jsDate = new Date(excelEpoch.getTime() + serial * 86400000);
+                row[key] = jsDate.toISOString().slice(0, 10);
               }
             }
+             // Sanitize numeric fields: remove commas
+             if (typeof row[key] === "string" && row[key].match(/^[-+]?\d{1,3}(,\d{3})*(\.\d+)?$/)) {
+               row[key] = row[key].replace(/,/g, "");
+             }
           }
           // for (const key of Object.keys(row)) {
           //   if (/date|posting_date|net_due_date/i.test(key) && row[key]) {
