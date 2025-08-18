@@ -381,7 +381,7 @@ exports.getTotalUsdSumFromForwardBookings = async (req, res) => {
     const result = await pool.query(`
       SELECT 
         ehl.hedged_amount, 
-        eh.quote_currency
+        eh.currency
       FROM exposure_hedge_links ehl
       INNER JOIN exposure_headers eh 
         ON ehl.exposure_header_id = eh.exposure_header_id
