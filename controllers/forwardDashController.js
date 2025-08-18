@@ -390,7 +390,7 @@ exports.getTotalUsdSumFromForwardBookings = async (req, res) => {
     let totalUsd = 0;
     for (const row of result.rows) {
       const amount = Number(row.hedged_amount) || 0;
-      const currency = (row.quote_currency || "").toUpperCase();
+      const currency = (row.currency || "").toUpperCase();
       const rate = rates[currency] || 1.0;
       totalUsd += amount * rate;
     }
