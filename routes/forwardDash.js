@@ -11,6 +11,8 @@ router.get(
   forwardDashController.getTotalUsdSumFromForwardBookings
 );
 
+router.get("/hedge-ratio",forwardDashController.getOpenAmountToBookingRatio);
+
 // GET /api/forwardDash/total-bankmargin
 router.get(
   "/total-bankmargin",
