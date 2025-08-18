@@ -403,3 +403,29 @@ exports.getTotalUsdSumFromForwardBookings = async (req, res) => {
     });
   }
 };
+
+
+exports.getOpenAmountToBookingRatio = async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        (SELECT COALESCE(SUM(total_open_amount), 0) FROM exposure_headers) AS total_open,
+        (SELECT COALESCE(SUM(booking_amount), 0) FROM forward_bookings) AS total_booking
+    `);
+
+    const { total_open, total_booking } = result.rows[0];
+    let ratio = 0;
+
+    if (Number(total_booking) > 0) {
+      ratio = (Number(total_open) / Number(total_booking)) * 100;
+    }
+
+    res.json({ ratio });
+  } catch (err) {
+    res.status(500).json({
+      error: "Error calculating open amount to booking ratio",
+      details: err.message,
+    });
+  }
+};
+
