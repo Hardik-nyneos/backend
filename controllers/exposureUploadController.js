@@ -2755,6 +2755,166 @@ async function rejectMultipleExposureHeaders(req, res) {
 
 // POST /api/exposureUpload/approve-multiple-headers
 // Body: { exposureHeaderIds: [id1, id2, ...], approved_by, approval_comment }
+// async function approveMultipleExposureHeaders(req, res) {
+//   const { exposureHeaderIds, approved_by, approval_comment } = req.body;
+//   if (
+//     !Array.isArray(exposureHeaderIds) ||
+//     exposureHeaderIds.length === 0 ||
+//     !approved_by
+//   ) {
+//     return res.status(400).json({
+//       success: false,
+//       message: "exposureHeaderIds and approved_by are required",
+//     });
+//   }
+//   const client = await pool.connect();
+//   try {
+//     await client.query("BEGIN");
+//     // Fetch current statuses and types, and additional_header_details
+//     const { rows: headers } = await client.query(
+//       `SELECT exposure_header_id, approval_status, exposure_type, status, document_id, total_original_amount, total_open_amount, additional_header_details
+//        FROM exposure_headers WHERE exposure_header_id = ANY($1::uuid[])`,
+//       [exposureHeaderIds]
+//     );
+//     // Only allow approval if status is 'pending' (case-insensitive), skip if 'Rejected' or 'Approved'
+//     const toDelete = headers
+//       .filter(
+//         (h) =>
+//           h.approval_status &&
+//           h.approval_status.toLowerCase().includes("delete")
+//       )
+//       .map((h) => h.exposure_header_id);
+//     const toApprove = headers
+//       .filter((h) => {
+//         const status = h.approval_status
+//           ? h.approval_status.toLowerCase()
+//           : "pending";
+//         // Allow approval if status is 'pending' or 'rejected'
+//         return status === "pending" || status === "rejected";
+//       })
+//       .map((h) => h.exposure_header_id);
+//     const skipped = headers
+//       .filter((h) => {
+//         const status = h.approval_status
+//           ? h.approval_status.toLowerCase()
+//           : "pending";
+//         // Only skip if already 'approved'
+//         return status === "approved";
+//       })
+//       .map((h) => h.exposure_header_id);
+//     const results = { deleted: [], approved: [], rolled: [], skipped };
+//     // Handle delete-approval: delete header and line items
+//     if (toDelete.length > 0) {
+//       // Delete from exposure_rollover_log where child or parent matches toDelete to avoid FK violation
+//       await client.query(
+//         `DELETE FROM exposure_rollover_log WHERE child_header_id = ANY($1::uuid[]) OR parent_header_id = ANY($1::uuid[])`,
+//         [toDelete]
+//       );
+//       // Optionally, log deleted headers before deletion
+//       const { rows: deletedHeaders } = await client.query(
+//         `DELETE FROM exposure_headers WHERE exposure_header_id = ANY($1::uuid[]) RETURNING *`,
+//         [toDelete]
+//       );
+//       await client.query(
+//         `DELETE FROM exposure_line_items WHERE exposure_header_id = ANY($1::uuid[])`,
+//         [toDelete]
+//       );
+//       results.deleted = deletedHeaders;
+//       // Reverse rollover if needed (if LC and linked_po_so_number exists)
+//       for (const h of deletedHeaders) {
+//         let parentDocNo = null;
+//         if (
+//           h.exposure_type === "LC" &&
+//           h.additional_header_details &&
+//           h.additional_header_details.input_letters_of_credit &&
+//           h.additional_header_details.input_letters_of_credit
+//             .linked_po_so_number
+//         ) {
+//           parentDocNo =
+//             h.additional_header_details.input_letters_of_credit
+//               .linked_po_so_number;
+//         }
+//         if (h.exposure_type === "LC" && parentDocNo) {
+//           // Find parent exposure_header_id by document_id
+//           const { rows: parentRows } = await client.query(
+//             `SELECT exposure_header_id FROM exposure_headers WHERE document_id = $1 LIMIT 1`,
+//             [parentDocNo]
+//           );
+//           if (parentRows.length > 0) {
+//             const parentId = parentRows[0].exposure_header_id;
+//             await client.query(
+//               `UPDATE exposure_headers SET total_open_amount = total_open_amount + $1, status = 'Open' WHERE exposure_header_id = $2`,
+//               [h.total_original_amount, parentId]
+//             );
+//           }
+//         }
+//       }
+//     }
+//     // Approve remaining headers
+//     if (toApprove.length > 0) {
+//       // 1. Approve all headers (approval_status only, do not change status)
+//       const { rows: approvedHeaders } = await client.query(
+//         `UPDATE exposure_headers SET approval_status = 'Approved', approved_by = $1, approval_comment = $2, approved_at = NOW()
+//          WHERE exposure_header_id = ANY($3::uuid[])
+//          RETURNING *`,
+//         [approved_by, approval_comment || null, toApprove]
+//       );
+//       results.approved = approvedHeaders;
+
+//       // 2. For each approved LC, if rollover is needed, update status as well
+//       for (const h of approvedHeaders) {
+//         let parentDocNo = null;
+//         if (
+//           h.exposure_type === "LC" &&
+//           h.additional_header_details &&
+//           h.additional_header_details.input_letters_of_credit &&
+//           h.additional_header_details.input_letters_of_credit
+//             .linked_po_so_number
+//         ) {
+//           parentDocNo =
+//             h.additional_header_details.input_letters_of_credit
+//               .linked_po_so_number;
+//         }
+//         if (h.exposure_type === "LC" && parentDocNo) {
+//           // Find parent exposure_header_id by document_id
+//           const { rows: parentRows } = await client.query(
+//             `SELECT exposure_header_id FROM exposure_headers WHERE document_id = $1 LIMIT 1`,
+//             [parentDocNo]
+//           );
+//           if (parentRows.length > 0) {
+//             const parentId = parentRows[0].exposure_header_id;
+//             // Subtract the original amount from parent's open amount
+//             await client.query(
+//               `UPDATE exposure_headers SET total_open_amount = total_open_amount - $1, status = 'Rolled' WHERE exposure_header_id = $2`,
+//               [h.total_original_amount, parentId]
+//             );
+//             // Set status to 'Rolled' for this LC (status change only for rolled)
+//             await client.query(
+//               `UPDATE exposure_headers SET status = 'Rolled' WHERE exposure_header_id = $1`,
+//               [h.exposure_header_id]
+//             );
+//             // Log the rollover
+//             await client.query(
+//               `INSERT INTO exposure_rollover_log (parent_header_id, child_header_id, rollover_amount, rollover_date, created_at)
+//                VALUES ($1, $2, $3, CURRENT_DATE, NOW())`,
+//               [parentId, h.exposure_header_id, h.total_original_amount]
+//             );
+//             results.rolled.push(h);
+//           }
+//         }
+//       }
+//     }
+//     await client.query("COMMIT");
+//     res.status(200).json({ success: true, ...results });
+//   } catch (err) {
+//     await client.query("ROLLBACK");
+//     console.error("approveMultipleExposureHeaders error:", err);
+//     res.status(500).json({ success: false, error: err.message });
+//   } finally {
+//     client.release();
+//   }
+// }
+
 async function approveMultipleExposureHeaders(req, res) {
   const { exposureHeaderIds, approved_by, approval_comment } = req.body;
   if (
@@ -2820,9 +2980,10 @@ async function approveMultipleExposureHeaders(req, res) {
         [toDelete]
       );
       results.deleted = deletedHeaders;
-      // Reverse rollover if needed (if LC and linked_po_so_number exists)
+      // Reverse rollover if needed (if LC, GRN, creditors, debitors and linked_id exists)
       for (const h of deletedHeaders) {
         let parentDocNo = null;
+        // LC logic
         if (
           h.exposure_type === "LC" &&
           h.additional_header_details &&
@@ -2834,7 +2995,15 @@ async function approveMultipleExposureHeaders(req, res) {
             h.additional_header_details.input_letters_of_credit
               .linked_po_so_number;
         }
-        if (h.exposure_type === "LC" && parentDocNo) {
+        // GRN, creditors, debitors logic
+        if (
+          ["grn", "creditors", "debitors"].includes(h.exposure_type) &&
+          h.additional_header_details &&
+          h.additional_header_details.linked_id
+        ) {
+          parentDocNo = h.additional_header_details.linked_id;
+        }
+        if (parentDocNo) {
           // Find parent exposure_header_id by document_id
           const { rows: parentRows } = await client.query(
             `SELECT exposure_header_id FROM exposure_headers WHERE document_id = $1 LIMIT 1`,
@@ -2844,7 +3013,7 @@ async function approveMultipleExposureHeaders(req, res) {
             const parentId = parentRows[0].exposure_header_id;
             await client.query(
               `UPDATE exposure_headers SET total_open_amount = total_open_amount + $1, status = 'Open' WHERE exposure_header_id = $2`,
-              [h.total_original_amount, parentId]
+              [h.total_open_amount || h.total_original_amount, parentId]
             );
           }
         }
@@ -2861,9 +3030,10 @@ async function approveMultipleExposureHeaders(req, res) {
       );
       results.approved = approvedHeaders;
 
-      // 2. For each approved LC, if rollover is needed, update status as well
+      // 2. For each approved LC, GRN, creditors, debitors, if rollover is needed, update status as well
       for (const h of approvedHeaders) {
         let parentDocNo = null;
+        // LC logic
         if (
           h.exposure_type === "LC" &&
           h.additional_header_details &&
@@ -2875,7 +3045,15 @@ async function approveMultipleExposureHeaders(req, res) {
             h.additional_header_details.input_letters_of_credit
               .linked_po_so_number;
         }
-        if (h.exposure_type === "LC" && parentDocNo) {
+        // GRN, creditors, debitors logic
+        if (
+          ["grn", "creditors", "debitors"].includes(h.exposure_type) &&
+          h.additional_header_details &&
+          h.additional_header_details.linked_id
+        ) {
+          parentDocNo = h.additional_header_details.linked_id;
+        }
+        if (parentDocNo) {
           // Find parent exposure_header_id by document_id
           const { rows: parentRows } = await client.query(
             `SELECT exposure_header_id FROM exposure_headers WHERE document_id = $1 LIMIT 1`,
@@ -2888,7 +3066,7 @@ async function approveMultipleExposureHeaders(req, res) {
               `UPDATE exposure_headers SET total_open_amount = total_open_amount - $1, status = 'Rolled' WHERE exposure_header_id = $2`,
               [h.total_original_amount, parentId]
             );
-            // Set status to 'Rolled' for this LC (status change only for rolled)
+            // Set status to 'Rolled' for this header (status change only for rolled)
             await client.query(
               `UPDATE exposure_headers SET status = 'Rolled' WHERE exposure_header_id = $1`,
               [h.exposure_header_id]
