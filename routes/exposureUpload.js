@@ -14,6 +14,7 @@ const uploadFields = upload.fields([
   { name: "input_sales_orders", maxCount: 10 },
    { name: "input_creditors", maxCount: 10 },
   { name: "input_debitors", maxCount: 10 },
+{ name: "input_grn", maxCount: 10 },
 ]);
 
 router.get("/userVars", exposureUploadController.getUserVars);
