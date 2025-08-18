@@ -2037,6 +2037,16 @@ const batchUploadStagingData = async (req, res) => {
 
     // req.files: { input_letters_of_credit: [file, ...], ... }
     const files = [];
+    if (req.files && req.files.input_grn) {
+      for (const file of req.files.input_grn) {
+        files.push({
+          dataType: "grn",
+          file,
+          tableName: "input_grn",
+          filename: file.originalname,
+        });
+      }
+    }
     if (req.files && req.files.input_letters_of_credit) {
       for (const file of req.files.input_letters_of_credit) {
         files.push({
@@ -2174,7 +2184,7 @@ const batchUploadStagingData = async (req, res) => {
       let buCol = null;
       if (dataType === "LC") buCol = "applicant_name";
       else if (dataType === "PO" || dataType === "SO") buCol = "entity";
-      else if (dataType === "creditors" || dataType === "debitors")
+      else if (dataType === "creditors" || dataType === "debitors"||dataType === "grn")
         buCol = "company";
       // Constraint: if buCol is 'company', require 'bank_reference' to be present
       // if (buCol === "company") {
