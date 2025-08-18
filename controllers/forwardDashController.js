@@ -384,7 +384,7 @@ exports.getTotalUsdSumFromForwardBookings = async (req, res) => {
         eh.quote_currency
       FROM exposure_hedge_links ehl
       INNER JOIN exposure_headers eh 
-        ON ehl.exposure_header_id = eh.id
+        ON ehl.exposure_header_id = eh.exposure_header_id
     `);
 
     let totalUsd = 0;
