@@ -356,7 +356,7 @@ exports.getTotalBankMarginFromForwardBookings = async (req, res) => {
   }
 };
 
-const { pool } = require("../db");
+
 
 // GET /api/forwardDash/total-usd
 exports.getTotalUsdSumFromForwardBookings = async (req, res) => {
@@ -374,21 +374,31 @@ exports.getTotalUsdSumFromForwardBookings = async (req, res) => {
     SEK: 0.095,
     INR: 0.0117,
   };
+
   try {
-    const result = await pool.query(
-      "SELECT booking_amount, quote_currency FROM forward_bookings"
-    );
+    // Join hedge links with headers to fetch hedged_amount and currency
+    const result = await pool.query(`
+      SELECT 
+        ehl.hedged_amount, 
+        eh.quote_currency
+      FROM exposure_hedge_links ehl
+      INNER JOIN exposure_headers eh 
+        ON ehl.exposure_header_id = eh.id
+    `);
+
     let totalUsd = 0;
     for (const row of result.rows) {
-      const amount = Number(row.booking_amount) || 0;
+      const amount = Number(row.hedged_amount) || 0;
       const currency = (row.quote_currency || "").toUpperCase();
       const rate = rates[currency] || 1.0;
       totalUsd += amount * rate;
     }
+
     res.json({ totalUsd });
   } catch (err) {
-    res
-      .status(500)
-      .json({ error: "Error calculating total USD sum", details: err.message });
+    res.status(500).json({
+      error: "Error calculating total USD sum from hedges",
+      details: err.message,
+    });
   }
 };
