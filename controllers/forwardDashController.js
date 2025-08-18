@@ -1,3 +1,4 @@
+const { pool } = require("../db");
 // GET /api/forwardDash/bu-maturity-currency-summary
 exports.getBuMaturityCurrencySummaryJoined = async (req, res) => {
   try {
