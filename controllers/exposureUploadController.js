@@ -2983,25 +2983,42 @@ async function approveMultipleExposureHeaders(req, res) {
       // Reverse rollover if needed (if LC, GRN, creditors, debitors and linked_id exists)
       for (const h of deletedHeaders) {
         let parentDocNo = null;
+        const type = h.exposure_type ? h.exposure_type.toLowerCase() : "";
         // LC logic
         if (
-          h.exposure_type === "LC" &&
+          type === "lc" &&
           h.additional_header_details &&
           h.additional_header_details.input_letters_of_credit &&
-          h.additional_header_details.input_letters_of_credit
-            .linked_po_so_number
+          h.additional_header_details.input_letters_of_credit.linked_po_so_number
         ) {
-          parentDocNo =
-            h.additional_header_details.input_letters_of_credit
-              .linked_po_so_number;
+          parentDocNo = h.additional_header_details.input_letters_of_credit.linked_po_so_number;
         }
-        // GRN, creditors, debitors logic
+        // GRN logic
         if (
-          ["grn", "creditors", "debitors"].includes(h.exposure_type) &&
+          type === "grn" &&
           h.additional_header_details &&
-          h.additional_header_details.linked_id
+          h.additional_header_details.input_grn &&
+          h.additional_header_details.input_grn.linked_id
         ) {
-          parentDocNo = h.additional_header_details.linked_id;
+          parentDocNo = h.additional_header_details.input_grn.linked_id;
+        }
+        // Creditors logic
+        if (
+          type === "creditors" &&
+          h.additional_header_details &&
+          h.additional_header_details.input_creditors &&
+          h.additional_header_details.input_creditors.linked_id
+        ) {
+          parentDocNo = h.additional_header_details.input_creditors.linked_id;
+        }
+        // Debitors logic
+        if (
+          type === "debitors" &&
+          h.additional_header_details &&
+          h.additional_header_details.input_debitors &&
+          h.additional_header_details.input_debitors.linked_id
+        ) {
+          parentDocNo = h.additional_header_details.input_debitors.linked_id;
         }
         if (parentDocNo) {
           // Find parent exposure_header_id by document_id
@@ -3033,25 +3050,42 @@ async function approveMultipleExposureHeaders(req, res) {
       // 2. For each approved LC, GRN, creditors, debitors, if rollover is needed, update status as well
       for (const h of approvedHeaders) {
         let parentDocNo = null;
+        const type = h.exposure_type ? h.exposure_type.toLowerCase() : "";
         // LC logic
         if (
-          h.exposure_type === "LC" &&
+          type === "lc" &&
           h.additional_header_details &&
           h.additional_header_details.input_letters_of_credit &&
-          h.additional_header_details.input_letters_of_credit
-            .linked_po_so_number
+          h.additional_header_details.input_letters_of_credit.linked_po_so_number
         ) {
-          parentDocNo =
-            h.additional_header_details.input_letters_of_credit
-              .linked_po_so_number;
+          parentDocNo = h.additional_header_details.input_letters_of_credit.linked_po_so_number;
         }
-        // GRN, creditors, debitors logic
+        // GRN logic
         if (
-          ["grn", "creditors", "debitors"].includes(h.exposure_type) &&
+          type === "grn" &&
           h.additional_header_details &&
-          h.additional_header_details.linked_id
+          h.additional_header_details.input_grn &&
+          h.additional_header_details.input_grn.linked_id
         ) {
-          parentDocNo = h.additional_header_details.linked_id;
+          parentDocNo = h.additional_header_details.input_grn.linked_id;
+        }
+        // Creditors logic
+        if (
+          type === "creditors" &&
+          h.additional_header_details &&
+          h.additional_header_details.input_creditors &&
+          h.additional_header_details.input_creditors.linked_id
+        ) {
+          parentDocNo = h.additional_header_details.input_creditors.linked_id;
+        }
+        // Debitors logic
+        if (
+          type === "debitors" &&
+          h.additional_header_details &&
+          h.additional_header_details.input_debitors &&
+          h.additional_header_details.input_debitors.linked_id
+        ) {
+          parentDocNo = h.additional_header_details.input_debitors.linked_id;
         }
         if (parentDocNo) {
           // Find parent exposure_header_id by document_id
