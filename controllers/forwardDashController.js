@@ -429,3 +429,85 @@ exports.getOpenAmountToBookingRatio = async (req, res) => {
   }
 };
 
+// Exchange rates to USD (you can fetch from DB or API instead)
+const rates = {
+  USD: 1.0,
+  EUR: 1.1,
+  INR: 0.012,
+  GBP: 1.25,
+  AUD: 0.68,
+  CAD: 0.75,
+  CHF: 1.1,
+  CNY: 0.14,
+  JPY: 0.0068,
+  // extend as needed
+};
+
+// ================== Avg Exposure Maturity (WAET) ==================
+exports.getAvgExposureMaturity = async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        total_original_amount AS amount,
+        currency,
+        document_date,
+        GREATEST(DATE_PART('day', document_date - CURRENT_DATE), 0) AS days_to_maturity
+      FROM exposure_headers
+      WHERE document_date IS NOT NULL
+    `);
+
+    let weightedSum = 0;
+    let totalAmount = 0;
+
+    result.rows.forEach(row => {
+      const rate = rates[row.currency] || 1.0; // fallback to 1 if not found
+      const usdAmount = Math.abs(Number(row.amount)) * rate;
+      weightedSum += usdAmount * row.days_to_maturity;
+      totalAmount += usdAmount;
+    });
+
+    const avgMaturity = totalAmount > 0 ? (weightedSum / totalAmount).toFixed(2) : 0;
+
+    res.json({ avgExposureMaturity: avgMaturity });
+  } catch (err) {
+    res.status(500).json({
+      error: "Error calculating Avg Exposure Maturity",
+      details: err.message,
+    });
+  }
+};
+
+// ================== Avg Forward Maturity (WAHT) ==================
+exports.getAvgForwardMaturity = async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        booking_amount AS amount,
+        currency,
+        maturity_date,
+        GREATEST(DATE_PART('day', maturity_date - CURRENT_DATE), 0) AS days_to_maturity
+      FROM forward_bookings
+      WHERE maturity_date IS NOT NULL
+    `);
+
+    let weightedSum = 0;
+    let totalAmount = 0;
+
+    result.rows.forEach(row => {
+      const rate = rates[row.currency] || 1.0;
+      const usdAmount = Math.abs(Number(row.amount)) * rate;
+      weightedSum += usdAmount * row.days_to_maturity;
+      totalAmount += usdAmount;
+    });
+
+    const avgMaturity = totalAmount > 0 ? (weightedSum / totalAmount).toFixed(2) : 0;
+
+    res.json({ avgForwardMaturity: avgMaturity });
+  } catch (err) {
+    res.status(500).json({
+      error: "Error calculating Avg Forward Maturity",
+      details: err.message,
+    });
+  }
+};
+
