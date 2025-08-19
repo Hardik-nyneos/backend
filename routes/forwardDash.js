@@ -20,7 +20,7 @@ router.get(
   "/total-bankmargin",
   forwardDashController.getTotalBankMarginFromForwardBookings
 );
-
+router.get("/buysell",forwardDashController.getForwardBuySellTotals);
 router.get(
   "/rollover-counts",
   forwardDashController.getRolloverCountsByCurrency
