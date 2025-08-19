@@ -451,7 +451,7 @@ exports.getAvgExposureMaturity = async (req, res) => {
         total_original_amount AS amount,
         currency,
         document_date,
-        GREATEST(CAST(document_date AS date) - CURRENT_DATE, 0) AS days_to_maturity
+        ABS(CAST(document_date AS date) - CURRENT_DATE) AS days_to_maturity
       FROM exposure_headers
       WHERE document_date IS NOT NULL
     `);
@@ -460,7 +460,7 @@ exports.getAvgExposureMaturity = async (req, res) => {
     let totalAmount = 0;
 
     result.rows.forEach(row => {
-      const rate = rates[row.currency?.toUpperCase()] || 1.0; // normalize currency
+      const rate = rates[row.currency?.toUpperCase()] || 1.0;
       const usdAmount = Math.abs(Number(row.amount)) * rate;
       weightedSum += usdAmount * row.days_to_maturity;
       totalAmount += usdAmount;
@@ -481,11 +481,11 @@ exports.getAvgExposureMaturity = async (req, res) => {
 exports.getAvgForwardMaturity = async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT 
+     SELECT 
         booking_amount AS amount,
-        currency,
+        base_currency,
         maturity_date,
-        GREATEST(maturity_date - CURRENT_DATE , 0) AS days_to_maturity
+        ABS(CAST(maturity_date AS date) - CURRENT_DATE) AS days_to_maturity
       FROM forward_bookings
       WHERE maturity_date IS NOT NULL
     `);
@@ -494,13 +494,13 @@ exports.getAvgForwardMaturity = async (req, res) => {
     let totalAmount = 0;
 
     result.rows.forEach(row => {
-      const rate = rates[row.currency] || 1.0;
+      const rate = rates[row.currency?.toUpperCase()] || 1.0;
       const usdAmount = Math.abs(Number(row.amount)) * rate;
       weightedSum += usdAmount * row.days_to_maturity;
       totalAmount += usdAmount;
     });
 
-    const avgMaturity = totalAmount > 0 ? (weightedSum / totalAmount).toFixed(2) : 0;
+    const avgMaturity = totalAmount > 0 ? Math.round(weightedSum / totalAmount) : 0;
 
     res.json({ avgForwardMaturity: avgMaturity });
   } catch (err) {
@@ -510,4 +510,5 @@ exports.getAvgForwardMaturity = async (req, res) => {
     });
   }
 };
+
 
