@@ -390,7 +390,8 @@ const getTopCurrenciesFromHeaders = async (req, res) => {
     const currencyTotals = {};
     for (const row of result.rows) {
       const currency = (row.currency || "").toUpperCase();
-      const amount = Number(row.total_open_amount) || 0;
+      // const amount = Number(row.total_open_amount) || 0;
+      const amount = Math.abs(Number(row.total_open_amount) || 0);
       const usdValue = amount * (rates[currency] || 1.0);
       currencyTotals[currency] = (currencyTotals[currency] || 0) + usdValue;
     }
@@ -452,7 +453,8 @@ const getBuMaturityCurrencySummaryJoined = async (req, res) => {
       const currency = (row.currency || "Unknown").toUpperCase();
       const exposureType = (row.exposure_type || "").toUpperCase();
       for (const bucket of maturityBuckets) {
-        const amount = Number(row[bucket]) || 0;
+        // const amount = Number(row[bucket]) || 0;
+        const amount = Math.abs(Number(row[bucket]) || 0);
         if (amount === 0) continue;
         if (!summary[bucket]) summary[bucket] = {};
         if (!summary[bucket][bu]) summary[bucket][bu] = {};
@@ -1220,7 +1222,8 @@ const getTotalOpenAmountUsdSumFromHeaders = async (req, res) => {
     );
     let totalUsd = 0;
     for (const row of result.rows) {
-      const amount = Number(row.total_open_amount) || 0;
+      // const amount = Number(row.total_open_amount) || 0;
+      const amount = Math.abs(Number(row.total_open_amount) || 0);
       const currency = (row.currency || "").toUpperCase();
       const rate = rates[currency] || 1.0;
       totalUsd += amount * rate;
@@ -1297,7 +1300,8 @@ const getPayablesByCurrencyFromHeaders = async (req, res) => {
     const currencyTotals = {};
     for (const row of result.rows) {
       const currency = (row.currency || "").toUpperCase();
-      const amount = Number(row.total_open_amount) || 0;
+      // const amount = Number(row.total_open_amount) || 0;
+      const amount = Math.abs(Number(row.total_open_amount) || 0);
       currencyTotals[currency] =
         (currencyTotals[currency] || 0) + amount * (rates[currency] || 1.0);
     }
@@ -1376,7 +1380,8 @@ const getReceivablesByCurrencyFromHeaders = async (req, res) => {
     const currencyTotals = {};
     for (const row of result.rows) {
       const currency = (row.currency || "").toUpperCase();
-      const amount = Number(row.total_open_amount) || 0;
+      // const amount = Number(row.total_open_amount) || 0;
+      const amount = Math.abs(Number(row.total_open_amount) || 0);
       currencyTotals[currency] =
         (currencyTotals[currency] || 0) + amount * (rates[currency] || 1.0);
     }
@@ -1456,7 +1461,8 @@ const getAmountByCurrencyFromHeaders = async (req, res) => {
     const currencyTotals = {};
     for (const row of result.rows) {
       const currency = (row.currency || "").toUpperCase();
-      const amount = Number(row.total_open_amount) || 0;
+      // const amount = Number(row.total_open_amount) || 0;
+      const amount = Math.abs(Number(row.total_open_amount) || 0);
       currencyTotals[currency] =
         (currencyTotals[currency] || 0) + amount * (rates[currency] || 1.0);
     }
@@ -1551,7 +1557,8 @@ const getBusinessUnitCurrencySummaryFromHeaders = async (req, res) => {
     for (const row of result.rows) {
       const bu = row.entity || "Unknown";
       const currency = (row.currency || "Unknown").toUpperCase();
-      const amount = Number(row.total_open_amount) || 0;
+      // const amount = Number(row.total_open_amount) || 0;
+      const amount = Math.abs(Number(row.total_open_amount) || 0);
       const usdAmount = amount * (rates[currency] || 1.0);
       if (!buMap[bu]) buMap[bu] = {};
       if (!buMap[bu][currency]) buMap[bu][currency] = 0;
@@ -1654,7 +1661,8 @@ const getMaturityExpirySummaryFromHeaders = async (req, res) => {
       sum30 = 0,
       sumTotal = 0;
     for (const row of result.rows) {
-      const amount = Number(row.total_open_amount) || 0;
+      // const amount = Number(row.total_open_amount) || 0;
+      const amount = Math.abs(Number(row.total_open_amount) || 0);
       const currency = (row.currency || "USD").toUpperCase();
       const rate = rates[currency] || 1.0;
       const usdAmount = amount * rate;
@@ -3048,7 +3056,8 @@ async function approveMultipleExposureHeaders(req, res) {
             const parentId = parentRows[0].exposure_header_id;
             await client.query(
               `UPDATE exposure_headers SET total_open_amount = total_open_amount + $1, status = 'Open' WHERE exposure_header_id = $2`,
-              [h.total_open_amount || h.total_original_amount, parentId]
+              // [h.total_open_amount || h.total_original_amount, parentId]
+                 [Math.abs(h.total_open_amount || h.total_original_amount), parentId]
             );
           }
         }
@@ -3116,7 +3125,8 @@ async function approveMultipleExposureHeaders(req, res) {
             // Subtract the original amount from parent's open amount
             await client.query(
               `UPDATE exposure_headers SET total_open_amount = total_open_amount - $1, status = 'Rolled' WHERE exposure_header_id = $2`,
-              [h.total_original_amount, parentId]
+              // [h.total_original_amount, parentId]
+                [Math.abs(h.total_original_amount), parentId]
             );
             // Set status to 'Rolled' for this header (status change only for rolled)
             await client.query(
@@ -3127,7 +3137,8 @@ async function approveMultipleExposureHeaders(req, res) {
             await client.query(
               `INSERT INTO exposure_rollover_log (parent_header_id, child_header_id, rollover_amount, rollover_date, created_at)
                VALUES ($1, $2, $3, CURRENT_DATE, NOW())`,
-              [parentId, h.exposure_header_id, h.total_original_amount]
+              // [parentId, h.exposure_header_id, h.total_original_amount]
+                 [parentId, h.exposure_header_id, Math.abs(h.total_original_amount)]
             );
             results.rolled.push(h);
           }
