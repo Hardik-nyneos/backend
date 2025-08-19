@@ -451,7 +451,7 @@ exports.getAvgExposureMaturity = async (req, res) => {
         total_original_amount AS amount,
         currency,
         document_date,
-        GREATEST(DATE_PART('day', document_date - CURRENT_DATE), 0) AS days_to_maturity
+        GREATEST(document_date - CURRENT_DATE, 0) AS days_to_maturity
       FROM exposure_headers
       WHERE document_date IS NOT NULL
     `);
@@ -485,7 +485,7 @@ exports.getAvgForwardMaturity = async (req, res) => {
         booking_amount AS amount,
         currency,
         maturity_date,
-        GREATEST(DATE_PART('day', maturity_date - CURRENT_DATE), 0) AS days_to_maturity
+        GREATEST(maturity_date - CURRENT_DATE , 0) AS days_to_maturity
       FROM forward_bookings
       WHERE maturity_date IS NOT NULL
     `);
