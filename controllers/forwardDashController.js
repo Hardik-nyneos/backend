@@ -511,4 +511,41 @@ exports.getAvgForwardMaturity = async (req, res) => {
   }
 };
 
+exports.getForwardBuySellTotals = async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        booking_amount AS amount,
+        quote_currency,
+        order_type
+      FROM forward_bookings
+      WHERE booking_amount IS NOT NULL
+    `);
+
+    let buyTotal = 0;
+    let sellTotal = 0;
+
+    result.rows.forEach(row => {
+      const rate = rates[row.currency?.toUpperCase()] || 1.0;
+      const usdAmount = Math.abs(Number(row.amount)) * rate;
+
+      if (row.order_type?.toUpperCase() === "BUY") {
+        buyTotal += usdAmount;
+      } else if (row.order_type?.toUpperCase() === "SELL") {
+        sellTotal += usdAmount;
+      }
+    });
+
+    res.json({
+      buyForwardsUSD: buyTotal.toFixed(2),
+      sellForwardsUSD: sellTotal.toFixed(2),
+    });
+  } catch (err) {
+    res.status(500).json({
+      error: "Error calculating Buy/Sell Forwards totals",
+      details: err.message,
+    });
+  }
+};
+
 
