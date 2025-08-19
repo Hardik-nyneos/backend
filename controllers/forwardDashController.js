@@ -451,7 +451,7 @@ exports.getAvgExposureMaturity = async (req, res) => {
         total_original_amount AS amount,
         currency,
         document_date,
-        GREATEST(document_date - CURRENT_DATE, 0) AS days_to_maturity
+        GREATEST(CAST(document_date AS date) - CURRENT_DATE, 0) AS days_to_maturity
       FROM exposure_headers
       WHERE document_date IS NOT NULL
     `);
@@ -460,13 +460,13 @@ exports.getAvgExposureMaturity = async (req, res) => {
     let totalAmount = 0;
 
     result.rows.forEach(row => {
-      const rate = rates[row.currency] || 1.0; // fallback to 1 if not found
+      const rate = rates[row.currency?.toUpperCase()] || 1.0; // normalize currency
       const usdAmount = Math.abs(Number(row.amount)) * rate;
       weightedSum += usdAmount * row.days_to_maturity;
       totalAmount += usdAmount;
     });
 
-    const avgMaturity = totalAmount > 0 ? (weightedSum / totalAmount).toFixed(2) : 0;
+    const avgMaturity = totalAmount > 0 ? Math.round(weightedSum / totalAmount) : 0;
 
     res.json({ avgExposureMaturity: avgMaturity });
   } catch (err) {
