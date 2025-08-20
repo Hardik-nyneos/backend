@@ -37,5 +37,5 @@ router.get(
   "/bu-maturity-currency-summary",
   forwardDashController.getBuMaturityCurrencySummaryJoined
 );
-
+router.get("/localcurr",forwardDashController.getUserCurrency);
 module.exports = router;
