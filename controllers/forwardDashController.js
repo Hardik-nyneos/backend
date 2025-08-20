@@ -549,3 +549,53 @@ exports.getForwardBuySellTotals = async (req, res) => {
 };
 
 
+exports.getUserCurrency = async (req, res) => {
+  try {
+    
+    const globalSession = require("../globalSession");
+    const session = globalSession.UserSessions[0];
+    if (!session) {
+      return res.status(404).json({ error: "No active session found" });
+    }
+
+    const userId = session.userId;
+
+    // Step 1: Get user's business unit name
+    const userResult = await pool.query(
+      "SELECT business_unit_name FROM users WHERE id = $1",
+      [userId]
+    );
+
+    if (!userResult.rows.length) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const userBu = userResult.rows[0].business_unit_name;
+
+    if (!userBu) {
+      return res.status(404).json({ error: "User has no business unit assigned" });
+    }
+
+    // Step 2 & 3: Get default currency from masterentity
+    const entityResult = await pool.query(
+      "SELECT default_currency FROM masterentity WHERE entity_name = $1",
+      [userBu]
+    );
+
+    if (!entityResult.rows.length) {
+      return res.status(404).json({ error: "No entity found for given business unit" });
+    }
+
+    const defaultCurrency = entityResult.rows[0].default_currency;
+
+    // Step 4: Return default currency
+    return res.json({ defaultCurrency });
+
+  } catch (err) {
+    console.error("Error fetching user currency:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+
+
