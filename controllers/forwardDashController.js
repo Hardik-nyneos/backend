@@ -289,12 +289,12 @@ exports.getBankTradesData = async (req, res) => {
     for (const row of result.rows) {
       const bank = row.counterparty || "Unknown Bank";
       const trade = `${row.order_type ? row.order_type.trim() : ""} ${
-        row.quote_currency ? row.quote_currency.trim() : ""
+        row.base_currency ? row.base_currency.trim() : ""
       }`
         .replace(/\s+/g, " ")
         .trim();
       const amount = typeof row.booking_amount === "number" ? row.booking_amount : Number(row.booking_amount);
-      const currency = (row.quote_currency || '').toUpperCase();
+      const currency = (row.base_currency || '').toUpperCase();
       const rate = rates[currency] || 1.0;
       const amountUsd = amount * rate;
       if (!bankMap[bank]) {
