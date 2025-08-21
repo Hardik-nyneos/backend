@@ -1206,7 +1206,226 @@ module.exports = {
   bulkUpdateForwardBookingProcessingStatus,
   bulkDeleteForwardBookings,
   updateForwardBookingFields,
+  uploadBankForwardBookingsMulti,
 };
+
+async function uploadBankForwardBookingsMulti(req, res) {
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ error: "No files uploaded" });
+  }
+  const userId = req.body.userId;
+  if (!userId) {
+    return res.status(400).json({ error: "Please login to continue." });
+  }
+  const globalSession = require("../globalSession");
+  // Debug logs for session troubleshooting
+  console.log("Active sessions:", globalSession.UserSessions);
+  console.log("Request userId:", userId);
+  globalSession.getSessionsByUserId = function (userId) {
+    return globalSession.UserSessions.filter(
+      (s) => String(s.userId) === String(userId)
+    );
+  };
+  const sessions = globalSession.getSessionsByUserId(userId);
+  if (sessions.length === 0) {
+    for (const files of Object.values(req.files)) {
+      files.forEach((f) => fs.unlinkSync(f.path));
+    }
+    return res
+      .status(404)
+      .json({ error: "Session expired or not found. Please login again." });
+  }
+
+  // Generate a batch UUID for this upload
+  const { v4: uuidv4 } = require("uuid");
+  const upload_batch_id = uuidv4();
+  const results = [];
+  let stagingCols = [];
+  try {
+    const colRes = await pool.query(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'staging_bank_forward'`
+    );
+    stagingCols = colRes.rows.map((r) => r.column_name);
+  } catch (err) {
+    return res
+      .status(500)
+      .json({ error: "Failed to fetch staging table columns" });
+  }
+
+  // Loop through each upload array (e.g., forward_axis, forward_hdfc, ...)
+  for (const [arrayName, files] of Object.entries(req.files)) {
+    // Deduce bank identifier from array name
+    const bank_identifier = arrayName.replace("forward_", "").toUpperCase();
+    for (const file of files) {
+      let rows = [];
+      let fileType = path.extname(file.originalname).toLowerCase();
+      // Parse file
+      try {
+        if (fileType === ".csv") {
+          rows = await new Promise((resolve, reject) => {
+            const arr = [];
+            fs.createReadStream(file.path)
+              .pipe(csv())
+              .on("data", (row) => arr.push(row))
+              .on("end", () => resolve(arr))
+              .on("error", (err) => reject(err));
+          });
+        } else if (fileType === ".xls" || fileType === ".xlsx") {
+          const workbook = XLSX.readFile(file.path);
+          const sheetName = workbook.SheetNames[0];
+          rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
+            defval: null,
+          });
+        } else {
+          throw new Error("Unsupported file type");
+        }
+      } catch (err) {
+        results.push({
+          filename: file.originalname,
+          error: "Failed to parse file: " + err.message,
+        });
+        fs.unlinkSync(file.path);
+        continue;
+      }
+      if (!Array.isArray(rows) || rows.length === 0) {
+        results.push({
+          filename: file.originalname,
+          error: "No data to upload",
+        });
+        fs.unlinkSync(file.path);
+        continue;
+      }
+      // Insert into staging_bank_forward
+      let stagingSuccess = 0;
+      let stagingErrors = [];
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        try {
+          // Always set required columns
+          const insertObj = {
+            upload_batch_id,
+            bank_identifier,
+            bank_reference_id: r.bank_reference_id || uuidv4(),
+            row_number: i + 1,
+            source_reference_id: r.source_reference_id || null,
+            raw_data: r,
+            processing_status: "Pending",
+          };
+          // Add all other matching columns from row (except required)
+          for (const col of stagingCols) {
+            if (insertObj[col] !== undefined) continue; // already set
+            let value = r[col];
+            // Convert empty string to null for date columns
+            if (
+              value === "" &&
+              [
+                "trade_date",
+                "booking_date",
+                "expiry_date",
+                "delivery_from_date",
+                "delivery_to_date",
+                "option_start_date",
+                "maturity_date",
+                "processed_at",
+                "loaded_at",
+              ].includes(col)
+            ) {
+              value = null;
+            }
+            if (value !== undefined) insertObj[col] = value;
+          }
+          // Build dynamic insert
+          const fields = Object.keys(insertObj);
+          const values = fields.map((f) => insertObj[f]);
+          const placeholders = fields.map((_, idx) => `$${idx + 1}`).join(", ");
+          await pool.query(
+            `INSERT INTO staging_bank_forward (${fields.join(
+              ", "
+            )}) VALUES (${placeholders})`,
+            values
+          );
+          stagingSuccess++;
+        } catch (err) {
+          stagingErrors.push({ row: i + 1, error: err.message });
+        }
+      }
+      // Map and insert into forward_bookings
+      let bookingSuccess = 0;
+      let bookingErrors = [];
+      // Get all mappings for this bank
+      let mappings = [];
+      try {
+        const mapRes = await pool.query(
+          `SELECT * FROM fwd_mapping_bank_forward WHERE bank_identifier = $1 AND is_active = true`,
+          [bank_identifier]
+        );
+        mappings = mapRes.rows;
+      } catch (err) {
+        // If mapping fetch fails, skip booking insert
+        bookingErrors.push({
+          error: "Failed to fetch mapping: " + err.message,
+        });
+      }
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        try {
+          // Build booking object using mapping
+          const booking = {};
+          const unmapped = {};
+          for (const key in r) {
+            // Find mapping for this field
+            const map = mappings.find(
+              (m) =>
+                m.source_field === key && m.target_table === "forward_bookings"
+            );
+            if (map) {
+              // Apply transformation if any
+              let value = r[key];
+              if (map.transformation_expression) {
+                // For now, skip custom transformation logic
+                // You can add eval or a safe parser here if needed
+              }
+              booking[map.target_field] = value ?? map.default_value;
+            } else {
+              unmapped[key] = r[key];
+            }
+          }
+          booking.additional_bank_details = unmapped;
+          // Required fields fallback
+          booking.entity_level_0 = booking.entity_level_0 || r.entity_level_0;
+          booking.maturity_date = booking.maturity_date || r.maturity_date;
+          booking.currency_pair = booking.currency_pair || r.currency_pair;
+          booking.order_type = booking.order_type || r.order_type;
+          booking.booking_amount = booking.booking_amount || r.booking_amount;
+          booking.total_rate = booking.total_rate || r.total_rate;
+          booking.processing_status = "pending";
+          // Insert into forward_bookings
+          const fields = Object.keys(booking);
+          const values = fields.map((f) => booking[f]);
+          const placeholders = fields.map((_, idx) => `$${idx + 1}`).join(", ");
+          await pool.query(
+            `INSERT INTO forward_bookings (${fields.join(
+              ", "
+            )}) VALUES (${placeholders})`,
+            values
+          );
+          bookingSuccess++;
+        } catch (err) {
+          bookingErrors.push({ row: i + 1, error: err.message });
+        }
+      }
+      results.push({
+        filename: file.originalname,
+        staging_inserted: stagingSuccess,
+        staging_errors: stagingErrors,
+        bookings_inserted: bookingSuccess,
+        booking_errors: bookingErrors,
+      });
+      fs.unlinkSync(file.path);
+    }
+  }
+  res.status(200).json({ success: true, batch_id: upload_batch_id, results });
+}
 
 async function updateForwardBookingFields(req, res) {
   try {
