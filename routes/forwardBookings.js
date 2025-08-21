@@ -16,6 +16,18 @@ router.post('/forward-bookings/manual-entry', forwardController.addForwardBookin
 // Get all forward_bookings relevant to user's accessible entities
 router.get('/forward-bookings/forwardDetails', forwardController.getEntityRelevantForwardBookings);
 router.post('/exposure-hedge-links/link', forwardController.linkExposureHedge);
+
+const uploadFields = forwardController.upload.fields([
+  { name: "forward_axis", maxCount: 10 },
+  { name: "forward_hdfc", maxCount: 10 },
+  { name: "forward_icici", maxCount: 10 },
+  { name: "forward_kotak", maxCount: 10 },
+]);
+router.post(
+  "/bank-forward-bookings/upload-multi",
+  uploadFields,
+  forwardController.uploadBankForwardBookingsMulti
+);
 // Multi-file upload for forward bookings (CSV/Excel)
 router.post('/forward-bookings/upload-multi', forwardController.upload.array('files'), forwardController.uploadForwardBookingsMulti);
 router.post('/forward-confirmations/manual-entry', forwardController.addForwardConfirmationManualEntry);
