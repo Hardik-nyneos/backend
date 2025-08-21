@@ -417,7 +417,7 @@ exports.getOpenAmountToBookingRatio = async (req, res) => {
     let ratio = 0;
 
     if (Number(total_booking) > 0) {
-      ratio = ((Number(total_open) / Number(total_booking)) * 100).toFixed(3);
+      ratio = ((Number(total_booking) / Number(total_open)) * 100).toFixed(3);
     }
 
     res.json({ ratio });
