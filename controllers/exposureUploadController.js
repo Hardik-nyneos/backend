@@ -1550,7 +1550,7 @@ const getBusinessUnitCurrencySummaryFromHeaders = async (req, res) => {
   };
   try {
     const result = await pool.query(
-      "SELECT entity, currency, total_open_amount FROM exposure_headers"
+      "SELECT entity, currency, total_open_amount FROM exposure_headers WHERE (approval_status = 'Approved' OR approval_status = 'approved');"
     );
     // Aggregate by entity (business_unit) and currency
     const buMap = {};
