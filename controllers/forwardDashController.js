@@ -649,7 +649,7 @@ LEFT JOIN cover_summary cs
     ON es.bu = cs.bu AND es.currency = cs.currency;
     `);
 
-    const dashboards = result.rows.map((row: any) => {
+   const dashboards = result.rows.map((row) => {
       const outstanding_export = row.total_payable_exposure - row.cover_taken_export;
       const outstanding_import = row.total_payable_exposure - row.cover_taken_import;
 
