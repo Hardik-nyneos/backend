@@ -600,7 +600,7 @@ exports.getUserCurrency = async (req, res) => {
 import { Request, Response } from "express";
 
 
-export const getDashboard = async (req: Request, res: Response) => {
+exports.getDashboard = async (req, res) => {
   try {
     const result = await pool.query(`
      WITH exposure_summary AS (
