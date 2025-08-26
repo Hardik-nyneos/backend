@@ -597,5 +597,83 @@ exports.getUserCurrency = async (req, res) => {
   }
 };
 
+import { Request, Response } from "express";
+
+
+export const getDashboard = async (req: Request, res: Response) => {
+  try {
+    const result = await pool.query(`
+     WITH exposure_summary AS (
+  SELECT 
+      e.entity AS bu,
+      e.currency,
+      SUM(CASE WHEN lower(e.exposure_type) = 'debitors'  THEN ABS(e.total_original_amount) ELSE 0 END) AS debitors,
+      SUM(CASE WHEN lower(e.exposure_type) = 'creditors' THEN ABS(e.total_original_amount) ELSE 0 END) AS creditors,
+      SUM(CASE WHEN lower(e.exposure_type) = 'LC'       THEN ABS(e.total_original_amount) ELSE 0 END) AS lc,
+      SUM(CASE WHEN lower(e.exposure_type) = 'grn'      THEN ABS(e.total_original_amount) ELSE 0 END) AS grn,
+      SUM(
+  CASE WHEN lower(e.exposure_type) IN ('debitors','creditors','LC','grn')
+       THEN ABS(e.total_original_amount) ELSE 0 END
+) AS total_payable_exposure
+
+  FROM exposure_headers e
+  GROUP BY e.entity, e.currency
+),
+cover_summary AS (
+  SELECT 
+      e.entity AS bu,
+      e.currency,
+      COALESCE(SUM(CASE WHEN fb.order_type = 'Sell' THEN ABS(l.hedged_amount) ELSE 0 END),0) AS cover_taken_export,
+      COALESCE(SUM(CASE WHEN fb.order_type = 'Buy'  THEN ABS(l.hedged_amount) ELSE 0 END),0) AS cover_taken_import
+  FROM exposure_headers e
+  LEFT JOIN exposure_hedge_links l 
+      ON e.exposure_header_id = l.exposure_header_id
+  LEFT JOIN forward_bookings fb
+      ON l.booking_id = fb.system_transaction_id
+  GROUP BY e.entity, e.currency
+)
+SELECT 
+    es.bu,
+    es.currency,
+    es.debitors,
+    es.creditors,
+    es.lc,
+    es.grn,
+    es.total_payable_exposure,
+    cs.cover_taken_export,
+    cs.cover_taken_import,
+    (es.total_payable_exposure - cs.cover_taken_export) AS outstanding_cover_export,
+    (es.total_payable_exposure - cs.cover_taken_import) AS outstanding_cover_import
+FROM exposure_summary es
+LEFT JOIN cover_summary cs 
+    ON es.bu = cs.bu AND es.currency = cs.currency;
+    `);
+
+    const dashboards = result.rows.map((row: any) => {
+      const outstanding_export = row.total_payable_exposure - row.cover_taken_export;
+      const outstanding_import = row.total_payable_exposure - row.cover_taken_import;
+
+      return {
+        bu: row.bu,
+        currency: row.currency,
+        debitors: Number(row.debitors),
+        creditors: Number(row.creditors),
+        lc: Number(row.lc),
+        grn: Number(row.grn),
+        total_payable_exposure: Number(row.total_payable_exposure),
+        cover_taken_export: Number(row.cover_taken_export),
+        cover_taken_import: Number(row.cover_taken_import),
+        outstanding_cover_export: outstanding_export,
+        outstanding_cover_import: outstanding_import
+      };
+    });
+
+    res.json(dashboards);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server error");
+  }
+};
+
 
 
