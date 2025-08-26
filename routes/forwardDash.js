@@ -14,7 +14,7 @@ router.get(
 router.get("/hedge-ratio",forwardDashController.getOpenAmountToBookingRatio);
 router.get("/waet",forwardDashController.getAvgExposureMaturity);
 router.get("/waht",forwardDashController.getAvgForwardMaturity);
-
+router.get("/newtable",forwardDashController.getDashboard)
 // GET /api/forwardDash/total-bankmargin
 router.get(
   "/total-bankmargin",
