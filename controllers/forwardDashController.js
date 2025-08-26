@@ -649,24 +649,26 @@ LEFT JOIN cover_summary cs
     ON es.bu = cs.bu AND es.currency = cs.currency;
     `);
 
-   const dashboards = result.rows.map((row) => {
-      const outstanding_export = row.total_payable_exposure - row.cover_taken_export;
-      const outstanding_import = row.total_payable_exposure - row.cover_taken_import;
+   const dashboards = result.rows.map((row, index) => {
+  const outstanding_export = row.total_payable_exposure - row.cover_taken_export;
+  const outstanding_import = row.total_payable_exposure - row.cover_taken_import;
 
-      return {
-        bu: row.bu,
-        currency: row.currency,
-        debitors: Number(row.debitors),
-        creditors: Number(row.creditors),
-        lc: Number(row.lc),
-        grn: Number(row.grn),
-        total_payable_exposure: Number(row.total_payable_exposure),
-        cover_taken_export: Number(row.cover_taken_export),
-        cover_taken_import: Number(row.cover_taken_import),
-        outstanding_cover_export: outstanding_export,
-        outstanding_cover_import: outstanding_import
-      };
-    });
+  return {
+    id: index + 1, // serial from 1 to N
+    bu: row.bu,
+    currency: row.currency,
+    debitors: Number(row.debitors),
+    creditors: Number(row.creditors),
+    lc: Number(row.lc),
+    grn: Number(row.grn),
+    total_payable_exposure: Number(row.total_payable_exposure),
+    cover_taken_export: Number(row.cover_taken_export),
+    cover_taken_import: Number(row.cover_taken_import),
+    outstanding_cover_export: outstanding_export,
+    outstanding_cover_import: outstanding_import
+  };
+});
+
 
     res.json(dashboards);
   } catch (err) {
