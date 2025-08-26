@@ -452,8 +452,8 @@ exports.getAvgExposureMaturity = async (req, res) => {
         currency,
         document_date,
         ABS(CAST(document_date AS date) - CURRENT_DATE) AS days_to_maturity
-      FROM exposure_headers
-      WHERE document_date IS NOT NULL
+      FROM exposure_headers 
+      WHERE document_date IS NOT NULL AND (approval_status = 'Approved' OR approval_status = 'approved');
     `);
 
     let weightedSum = 0;
