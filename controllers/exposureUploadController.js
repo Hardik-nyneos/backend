@@ -1295,7 +1295,7 @@ const getPayablesByCurrencyFromHeaders = async (req, res) => {
   };
   try {
     const result = await pool.query(
-      "SELECT total_open_amount, currency FROM exposure_headers WHERE exposure_type = 'PO' OR exposure_type = 'creditors' OR exposure_type = 'grn'"
+      "SELECT total_open_amount, currency FROM exposure_headers WHERE (exposure_type = 'PO' OR exposure_type = 'creditors' OR exposure_type = 'grn') AND (approval_status = 'Approved' OR approval_status = 'approved');"
     );
     const currencyTotals = {};
     for (const row of result.rows) {
