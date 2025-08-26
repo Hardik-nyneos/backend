@@ -1456,7 +1456,7 @@ const getAmountByCurrencyFromHeaders = async (req, res) => {
   };
   try {
     const result = await pool.query(
-      "SELECT total_open_amount, currency FROM exposure_headers"
+      "SELECT total_open_amount, currency FROM exposure_headers WHERE (approval_status = 'Approved' OR approval_status = 'approved');"
     );
     const currencyTotals = {};
     for (const row of result.rows) {
