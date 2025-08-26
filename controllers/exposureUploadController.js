@@ -1218,7 +1218,7 @@ const getTotalOpenAmountUsdSumFromHeaders = async (req, res) => {
   };
   try {
     const result = await pool.query(
-      "SELECT total_open_amount, currency FROM exposure_headers"
+      "SELECT total_open_amount, currency FROM exposure_headers WHERE (approval_status = 'Approved' OR approval_status = 'approved');"
     );
     let totalUsd = 0;
     for (const row of result.rows) {
