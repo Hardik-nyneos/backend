@@ -1375,7 +1375,7 @@ const getReceivablesByCurrencyFromHeaders = async (req, res) => {
   };
   try {
     const result = await pool.query(
-      "SELECT total_open_amount, currency, exposure_type FROM exposure_headers WHERE exposure_type = 'SO' OR exposure_type = 'LC' OR exposure_type = 'debitors'"
+      "SELECT total_open_amount, currency, exposure_type FROM exposure_headers WHERE exposure_type = 'SO' OR exposure_type = 'LC' OR exposure_type = 'debitors' AND (approval_status = 'Approved' OR approval_status = 'approved');"
     );
     const currencyTotals = {};
     for (const row of result.rows) {
